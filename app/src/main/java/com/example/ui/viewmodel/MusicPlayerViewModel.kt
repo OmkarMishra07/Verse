@@ -154,6 +154,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     init {
         instance = this
 
+        val prefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
+
+        if (savedTrack == null) {
+            val lastTrackId = prefs.getString("last_track_id", null)
+            if (lastTrackId != null) {
+                savedTrack = Track(
+                    id = lastTrackId,
+                    title = prefs.getString("last_track_title", "") ?: "",
+                    artist = prefs.getString("last_track_artist", "") ?: "",
+                    album = prefs.getString("last_track_album", "") ?: "",
+                    thumbnailUrl = prefs.getString("last_track_thumb", "") ?: "",
+                    duration = prefs.getString("last_track_duration", "") ?: ""
+                )
+            }
+        }
+        if (savedPositionMs == 0L) {
+            savedPositionMs = prefs.getLong("last_position_ms", 0L)
+        }
+
         // Restore state if saved, otherwise use defaults
         _currentTrack.value = savedTrack ?: CuratedTracks.trending.first()
         _isPlaying.value = savedIsPlaying
@@ -162,15 +181,30 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _queue.value = savedQueue ?: CuratedTracks.allCurated
         _currentQueueIndex.value = savedQueueIndex
 
-        // Persist state updates to companion object for recreation recovery
+        // Persist state updates to companion object and SharedPreferences
         viewModelScope.launch {
-            currentTrack.collect { savedTrack = it }
+            currentTrack.collect { track ->
+                savedTrack = track
+                if (track != null) {
+                    prefs.edit()
+                        .putString("last_track_id", track.id)
+                        .putString("last_track_title", track.title)
+                        .putString("last_track_artist", track.artist)
+                        .putString("last_track_album", track.album)
+                        .putString("last_track_thumb", track.thumbnailUrl)
+                        .putString("last_track_duration", track.duration)
+                        .apply()
+                }
+            }
         }
         viewModelScope.launch {
             isPlaying.collect { savedIsPlaying = it }
         }
         viewModelScope.launch {
-            currentPositionMs.collect { savedPositionMs = it }
+            currentPositionMs.collect { pos -> 
+                savedPositionMs = pos 
+                prefs.edit().putLong("last_position_ms", pos).apply()
+            }
         }
         viewModelScope.launch {
             durationMs.collect { savedDurationMs = it }
