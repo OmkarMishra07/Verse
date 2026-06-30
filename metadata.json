@@ -1,0 +1,6 @@
+{
+  "name": "iPod Player",
+  "description": "Premium iPod-inspired YouTube Music Player with classic click wheel controls and seamless YouTube integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
