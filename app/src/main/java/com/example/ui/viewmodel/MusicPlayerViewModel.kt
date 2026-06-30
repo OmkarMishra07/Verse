@@ -24,6 +24,10 @@ enum class ScreenType(val title: String) {
     PLAYLIST_DETAIL("Playlist Details")
 }
 
+enum class RepeatMode {
+    OFF, ALL, ONE
+}
+
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class MusicPlayerViewModel(application: Application) : AndroidViewModel(application) {
     private val database = SongDatabase.getDatabase(application)
@@ -95,6 +99,17 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _seekRequestMs = MutableStateFlow<Long?>(null)
     val seekRequestMs = _seekRequestMs.asStateFlow()
 
+    private val _repeatMode = MutableStateFlow(RepeatMode.ALL)
+    val repeatMode = _repeatMode.asStateFlow()
+
+    fun toggleRepeatMode() {
+        _repeatMode.value = when (_repeatMode.value) {
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+            RepeatMode.OFF -> RepeatMode.ALL
+        }
+    }
+
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
@@ -154,6 +169,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     init {
         instance = this
 
+        val prefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
+
+        if (savedTrack == null) {
+            val lastTrackId = prefs.getString("last_track_id", null)
+            if (lastTrackId != null) {
+                savedTrack = Track(
+                    id = lastTrackId,
+                    title = prefs.getString("last_track_title", "") ?: "",
+                    artist = prefs.getString("last_track_artist", "") ?: "",
+                    album = prefs.getString("last_track_album", "") ?: "",
+                    thumbnailUrl = prefs.getString("last_track_thumb", "") ?: "",
+                    duration = prefs.getString("last_track_duration", "") ?: ""
+                )
+            }
+        }
+        if (savedPositionMs == 0L) {
+            savedPositionMs = prefs.getLong("last_position_ms", 0L)
+        }
+
         // Restore state if saved, otherwise use defaults
         _currentTrack.value = savedTrack ?: CuratedTracks.trending.first()
         _isPlaying.value = savedIsPlaying
@@ -162,15 +196,30 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _queue.value = savedQueue ?: CuratedTracks.allCurated
         _currentQueueIndex.value = savedQueueIndex
 
-        // Persist state updates to companion object for recreation recovery
+        // Persist state updates to companion object and SharedPreferences
         viewModelScope.launch {
-            currentTrack.collect { savedTrack = it }
+            currentTrack.collect { track ->
+                savedTrack = track
+                if (track != null) {
+                    prefs.edit()
+                        .putString("last_track_id", track.id)
+                        .putString("last_track_title", track.title)
+                        .putString("last_track_artist", track.artist)
+                        .putString("last_track_album", track.album)
+                        .putString("last_track_thumb", track.thumbnailUrl)
+                        .putString("last_track_duration", track.duration)
+                        .apply()
+                }
+            }
         }
         viewModelScope.launch {
             isPlaying.collect { savedIsPlaying = it }
         }
         viewModelScope.launch {
-            currentPositionMs.collect { savedPositionMs = it }
+            currentPositionMs.collect { pos -> 
+                savedPositionMs = pos 
+                prefs.edit().putLong("last_position_ms", pos).apply()
+            }
         }
         viewModelScope.launch {
             durationMs.collect { savedDurationMs = it }
@@ -258,9 +307,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     // Playback controls
     fun selectAndPlayTrack(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
+            _currentPositionMs.value = 0L
             _currentTrack.value = track
             _isPlaying.value = true
-            _currentPositionMs.value = 0L
 
             // Re-order or set queue
             val idx = newQueue.indexOfFirst { it.id == track.id }
@@ -301,18 +350,34 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _durationMs.value = durationMs
     }
 
-    fun playNext() {
+    fun playNext(isAutoPlay: Boolean = false) {
         val q = _queue.value
         if (q.isEmpty()) return
-        val nextIdx = (_currentQueueIndex.value + 1) % q.size
-        _currentQueueIndex.value = nextIdx
-        _currentTrack.value = q[nextIdx]
+        
+        if (isAutoPlay && _repeatMode.value == RepeatMode.ONE) {
+            _currentPositionMs.value = 0L
+            seekTo(0L)
+            _isPlaying.value = true
+            return
+        }
+
+        val nextIdx = _currentQueueIndex.value + 1
+        if (nextIdx >= q.size && isAutoPlay && _repeatMode.value == RepeatMode.OFF) {
+            _isPlaying.value = false
+            _currentPositionMs.value = 0L
+            seekTo(0L)
+            return
+        }
+        
+        val actualNextIdx = nextIdx % q.size
+        _currentQueueIndex.value = actualNextIdx
         _currentPositionMs.value = 0L
+        _currentTrack.value = q[actualNextIdx]
         _isPlaying.value = true
         
         // Save to recently played
         viewModelScope.launch {
-            songDao.insertRecentlyPlayed(q[nextIdx].toRecentlyPlayed())
+            songDao.insertRecentlyPlayed(q[actualNextIdx].toRecentlyPlayed())
         }
     }
 
@@ -327,8 +392,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         } else {
             val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
             _currentQueueIndex.value = prevIdx
-            _currentTrack.value = q[prevIdx]
             _currentPositionMs.value = 0L
+            _currentTrack.value = q[prevIdx]
             _isPlaying.value = true
             
             viewModelScope.launch {
