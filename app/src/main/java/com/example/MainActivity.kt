@@ -619,6 +619,7 @@ fun NowPlayingScreen(
     val durationMs by viewModel.durationMs.collectAsState()
     val likedTracks by viewModel.likedTracks.collectAsState()
     val isExpanded by viewModel.isExpanded.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
 
     val coverArtHeight by animateDpAsState(
         targetValue = if (isExpanded) 160.dp else 105.dp,
@@ -911,6 +912,23 @@ fun NowPlayingScreen(
                             imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                             contentDescription = "Like",
                             tint = if (isLiked) iPodAccentBlue else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { viewModel.toggleRepeatMode() },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        val (icon, tint) = when (repeatMode) {
+                            com.example.ui.viewmodel.RepeatMode.ALL -> androidx.compose.material.icons.Icons.Filled.Repeat to iPodAccentBlue
+                            com.example.ui.viewmodel.RepeatMode.ONE -> androidx.compose.material.icons.Icons.Filled.RepeatOne to iPodAccentBlue
+                            com.example.ui.viewmodel.RepeatMode.OFF -> androidx.compose.material.icons.Icons.Filled.Repeat to Color.White.copy(alpha = 0.3f)
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = "Repeat Mode",
+                            tint = tint,
                             modifier = Modifier.size(18.dp)
                         )
                     }

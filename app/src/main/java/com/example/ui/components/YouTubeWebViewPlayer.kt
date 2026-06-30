@@ -52,7 +52,7 @@ class YouTubePlayerBridge(
 // ─────────────────────────────────────────────────────────────────────────────
 //  Official YouTube Iframe API HTML
 // ─────────────────────────────────────────────────────────────────────────────
-private fun buildYouTubeIframeApiHtml(videoId: String): String = """
+private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autoplay: Int): String = """
 <!DOCTYPE html>
 <html>
   <head>
@@ -78,12 +78,13 @@ private fun buildYouTubeIframeApiHtml(videoId: String): String = """
           videoId: '$videoId',
           playerVars: {
             'playsinline': 1,
-            'autoplay': 1,
+            'autoplay': $autoplay,
             'controls': 1,
             'rel': 0,
             'modestbranding': 1,
             'fs': 0,
-            'origin': 'https://localhost'
+            'origin': 'https://localhost',
+            'start': $startSeconds
           },
           events: {
             'onReady': onPlayerReady,
@@ -167,7 +168,7 @@ fun YouTubeWebViewPlayer(
                             1 -> { viewModel.setPlaying(true);  viewModel.setLoading(false) }
                             2 -> { viewModel.setPlaying(false); viewModel.setLoading(false) }
                             3 ->   viewModel.setLoading(true)
-                            0 ->   post { viewModel.playNext() }
+                            0 ->   post { viewModel.playNext(isAutoPlay = true) }
                         }
                     },
                     onTimeUpdate = { t -> viewModel.updateProgress((t * 1000).toLong()) },
@@ -190,8 +191,11 @@ fun YouTubeWebViewPlayer(
         if (id == lastLoadedId) return@LaunchedEffect
         lastLoadedId = id
         
+        val startSecs = (viewModel.currentPositionMs.value / 1000).toInt()
+        val autoplay = if (viewModel.isPlaying.value) 1 else 0
+        
         // Use https://localhost as the base to emulate a normal web embed
-        val html = buildYouTubeIframeApiHtml(id)
+        val html = buildYouTubeIframeApiHtml(id, startSecs, autoplay)
         webView.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
     }
 
