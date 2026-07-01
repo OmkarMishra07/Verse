@@ -105,9 +105,10 @@ fun AuthScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.Top
         ) {
             // Header
             HeaderSection(
@@ -121,9 +122,9 @@ fun AuthScreen(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false)
+                    .wrapContentHeight()
                     .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) { page ->
                 when (page) {
                     0 -> LoginSlide(
@@ -439,7 +440,12 @@ fun LoginSlide(
                             if (task.isSuccessful) {
                                 val user = task.result?.user
                                 if (user != null) {
-                                    onAuthSuccess(user)
+                                    if (user.isEmailVerified) {
+                                        onAuthSuccess(user)
+                                    } else {
+                                        Toast.makeText(context, "Please verify your email before logging in. Check your inbox/spam folder.", Toast.LENGTH_LONG).show()
+                                        FirebaseAuth.getInstance().signOut()
+                                    }
                                 }
                             } else {
                                 Toast.makeText(context, "Login failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
@@ -502,6 +508,33 @@ fun SignUpSlide(
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
+    var waitingForVerification by remember { mutableStateOf(false) }
+
+    LaunchedEffect(waitingForVerification) {
+        if (waitingForVerification) {
+            while (true) {
+                kotlinx.coroutines.delay(3000)
+                val user = FirebaseAuth.getInstance().currentUser
+                if (user != null) {
+                    try {
+                        user.reload().await()
+                        if (user.isEmailVerified) {
+                            waitingForVerification = false
+                            Toast.makeText(context, "Verification Successful! You can now log in.", Toast.LENGTH_LONG).show()
+                            FirebaseAuth.getInstance().signOut()
+                            onLoginClick()
+                            break
+                        }
+                    } catch (e: Exception) {
+                        // ignore network errors during poll
+                    }
+                } else {
+                    waitingForVerification = false
+                    break
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -509,9 +542,32 @@ fun SignUpSlide(
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF121212).copy(alpha = 0.8f))
             .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(16.dp))
-            .padding(24.dp)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Column(
+        if (waitingForVerification) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                CircularProgressIndicator(color = Color.White)
+                Text(
+                    text = "Waiting for Verification...",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "We sent a link to your email. Please click it to verify.\n(Check your spam/junk folder if you don't see it.)\n\nThis screen will automatically update once verified.",
+                    color = Color.Gray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -671,8 +727,17 @@ fun SignUpSlide(
                                     val profileUpdates = userProfileChangeRequest {
                                         displayName = username
                                     }
-                                    user.updateProfile(profileUpdates)
-                                    onAuthSuccess(user)
+                                    user.updateProfile(profileUpdates).addOnCompleteListener {
+                                        user.sendEmailVerification().addOnCompleteListener { verifyTask ->
+                                            if (verifyTask.isSuccessful) {
+                                                waitingForVerification = true
+                                            } else {
+                                                Toast.makeText(context, "Failed to send verification email.", Toast.LENGTH_LONG).show()
+                                                FirebaseAuth.getInstance().signOut()
+                                                onLoginClick()
+                                            }
+                                        }
+                                    }
                                 }
                             } else {
                                 Toast.makeText(context, "Registration failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
@@ -772,6 +837,7 @@ fun SignUpSlide(
                 )
             }
         }
+    }
     }
 }
 

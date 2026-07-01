@@ -15,10 +15,28 @@ class AuthViewModel : ViewModel() {
     val currentUser: StateFlow<FirebaseUser?> = _currentUser.asStateFlow()
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-        _currentUser.value = firebaseAuth.currentUser
+        val user = firebaseAuth.currentUser
+        if (user != null) {
+            // Check if they are an unverified email/password user
+            val isEmailPass = user.providerData.any { it.providerId == "password" }
+            if (isEmailPass && !user.isEmailVerified) {
+                // Keep them out of the main app until verified
+                _currentUser.value = null
+            } else {
+                _currentUser.value = user
+            }
+        } else {
+            _currentUser.value = null
+        }
     }
 
     init {
+        val initialUser = auth.currentUser
+        if (initialUser != null && initialUser.providerData.any { it.providerId == "password" } && !initialUser.isEmailVerified) {
+            _currentUser.value = null
+        } else {
+            _currentUser.value = initialUser
+        }
         auth.addAuthStateListener(authStateListener)
     }
 

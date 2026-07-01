@@ -35,6 +35,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val database = SongDatabase.getDatabase(application)
     private val songDao = database.songDao()
 
+    var currentUserId: String? = null
+
     // Screen State
     private val _isExpanded = MutableStateFlow(true)
     val isExpanded = _isExpanded.asStateFlow()
@@ -393,7 +395,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _currentTrack.value = resolved
         _isPlaying.value = true
         
-        songDao.insertRecentlyPlayed(resolved.toRecentlyPlayed())
+        val recentlyPlayed = resolved.toRecentlyPlayed()
+        songDao.insertRecentlyPlayed(recentlyPlayed)
+        currentUserId?.let { uid ->
+            com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
+        }
     }
 
     // Playback controls
@@ -488,8 +494,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val isCurrentlyLiked = songDao.isLiked(track.id).first()
             if (isCurrentlyLiked) {
                 songDao.deleteLikedSong(track.toLikedSong())
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.deleteLikedSong(uid, track.id)
+                }
             } else {
-                songDao.insertLikedSong(track.toLikedSong())
+                val likedSong = track.toLikedSong()
+                songDao.insertLikedSong(likedSong)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertLikedSong(uid, likedSong)
+                }
             }
         }
     }
@@ -498,7 +511,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun createPlaylist(name: String) {
         viewModelScope.launch {
             if (name.isNotBlank()) {
-                songDao.insertPlaylist(Playlist(name = name))
+                val playlist = Playlist(name = name)
+                val id = songDao.insertPlaylist(playlist)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertPlaylist(uid, playlist.copy(id = id))
+                }
             }
         }
     }
@@ -507,6 +524,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             songDao.deletePlaylist(playlistId)
             songDao.deleteSongsForPlaylist(playlistId)
+            currentUserId?.let { uid ->
+                com.example.data.remote.FirestoreService.deletePlaylist(uid, playlistId)
+            }
             if (_selectedPlaylist.value?.id == playlistId) {
                 _selectedPlaylist.value = null
                 setScreen(ScreenType.PLAYLISTS)
@@ -518,8 +538,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             if (newName.isNotBlank()) {
                 songDao.renamePlaylist(playlistId, newName)
+                val updated = _selectedPlaylist.value?.copy(name = newName) ?: Playlist(id = playlistId, name = newName)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertPlaylist(uid, updated)
+                }
                 if (_selectedPlaylist.value?.id == playlistId) {
-                    _selectedPlaylist.value = _selectedPlaylist.value?.copy(name = newName)
+                    _selectedPlaylist.value = updated
                 }
             }
         }
@@ -530,6 +554,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val maxOrder = songDao.getMaxOrderForPlaylist(playlistId) ?: 0
             val song = track.toPlaylistSong(playlistId, maxOrder + 1)
             songDao.insertPlaylistSong(song)
+            currentUserId?.let { uid ->
+                com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, song)
+            }
         }
     }
 
@@ -539,6 +566,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val match = songs.find { it.videoId == track.id }
             if (match != null) {
                 songDao.deletePlaylistSong(match)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.deletePlaylistSong(uid, playlistId, track.id)
+                }
             }
         }
     }
@@ -551,9 +581,43 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 songs.add(toIdx, moved)
                 // Re-save all with updated orders
                 songs.forEachIndexed { index, playlistSong ->
-                    songDao.insertPlaylistSong(playlistSong.copy(displayOrder = index))
+                    val updated = playlistSong.copy(displayOrder = index)
+                    songDao.insertPlaylistSong(updated)
+                    currentUserId?.let { uid ->
+                        com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, updated)
+                    }
                 }
             }
+        }
+    }
+
+    // Auth sync
+    fun onUserLoggedIn(uid: String) {
+        if (currentUserId == uid) return
+        currentUserId = uid
+        viewModelScope.launch {
+            // First time login on this device? We merge/pull from Firestore.
+            val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
+            firestoreLiked.forEach { songDao.insertLikedSong(it) }
+
+            val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
+            firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
+
+            val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
+            firestorePlaylists.forEach { (playlist, songs) ->
+                songDao.insertPlaylist(playlist)
+                songs.forEach { songDao.insertPlaylistSong(it) }
+            }
+        }
+    }
+
+    fun onUserLoggedOut() {
+        currentUserId = null
+        viewModelScope.launch {
+            songDao.clearAllData()
+            _queue.value = CuratedTracks.allCurated
+            _currentQueueIndex.value = 0
+            _currentTrack.value = CuratedTracks.allCurated.first()
         }
     }
 

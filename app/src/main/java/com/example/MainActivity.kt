@@ -94,6 +94,17 @@ class MainActivity : ComponentActivity() {
                     ) {
                         val authViewModel: AuthViewModel = viewModel()
                         val currentUser by authViewModel.currentUser.collectAsState()
+                        val musicViewModel: com.example.ui.viewmodel.MusicPlayerViewModel = viewModel()
+
+                        LaunchedEffect(currentUser) {
+                            val user = currentUser
+                            if (user != null) {
+                                com.example.data.remote.FirestoreService.initUserProfile(user)
+                                musicViewModel.onUserLoggedIn(user.uid)
+                            } else {
+                                musicViewModel.onUserLoggedOut()
+                            }
+                        }
 
                         if (currentUser == null) {
                             AuthScreen(
@@ -631,31 +642,55 @@ fun iPodStatusBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        val displayStr = if (currentTrack != null) {
-            "${currentTrack.title} • ${currentTrack.artist}"
-        } else {
-            "iPod Player"
-        }
         Text(
-            text = displayStr,
+            text = "Verse",
             color = Color.White.copy(alpha = 0.9f),
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         if (currentUser != null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.clickable { onLogout() }
             ) {
+                val photoUrl = currentUser.photoUrl
+                val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } 
+                    ?: currentUser.email 
+                    ?: "U"
+                
+                if (photoUrl != null) {
+                    coil.compose.AsyncImage(
+                        model = photoUrl,
+                        contentDescription = "Profile",
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Color.DarkGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = name.first().uppercase(),
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                
                 Text(
                     text = "Logout",
                     color = iPodAccentBlue,
                     fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 4.dp)
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
