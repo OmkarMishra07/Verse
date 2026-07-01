@@ -56,11 +56,14 @@ import com.example.data.model.toTrack
 import com.example.ui.components.ClickWheel
 import com.example.ui.components.MiniYouTubePlayerBar
 import com.example.ui.components.YouTubeWebViewPlayer
+import com.example.ui.components.AuthScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.google.firebase.auth.FirebaseAuth
 import com.example.ui.theme.iPodAccentBlue
 import com.example.ui.theme.iPodChassis
 import com.example.ui.theme.iPodChassisDark
 import com.example.ui.theme.iPodDisplayBg
+import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.MusicPlayerViewModel
 import com.example.ui.viewmodel.ScreenType
 import kotlinx.coroutines.delay
@@ -89,7 +92,24 @@ class MainActivity : ComponentActivity() {
                             .padding(innerPadding),
                         contentAlignment = Alignment.Center
                     ) {
-                        iPodPlayerApp()
+                        val authViewModel: AuthViewModel = viewModel()
+                        val currentUser by authViewModel.currentUser.collectAsState()
+
+                        if (currentUser == null) {
+                            AuthScreen(
+                                onAuthSuccess = { user ->
+                                    // Directly update StateFlow — no waiting for AuthStateListener
+                                    authViewModel.onUserSignedIn(user)
+                                }
+                            )
+                        } else {
+                            iPodPlayerApp(
+                                currentUser = currentUser,
+                                onLogout = {
+                                    authViewModel.signOut()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -98,7 +118,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun iPodPlayerApp() {
+fun iPodPlayerApp(
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
+) {
     val context = LocalContext.current
     val viewModel: MusicPlayerViewModel = viewModel()
     
@@ -120,7 +143,9 @@ fun iPodPlayerApp() {
         showCreatePlaylistDialog = { showCreatePlaylistDialog = true },
         playlistToAddTo = playlistToAddTo,
         onAddTrackToPlaylist = { playlistToAddTo = it },
-        onShowLyrics = { showLyricsDialog = true }
+        onShowLyrics = { showLyricsDialog = true },
+        currentUser = currentUser,
+        onLogout = onLogout
     )
 
     // Dialogue Overlay: Create Playlist
@@ -253,7 +278,9 @@ fun iPodDeviceFrame(
     showCreatePlaylistDialog: () -> Unit,
     playlistToAddTo: Track?,
     onAddTrackToPlaylist: (Track) -> Unit,
-    onShowLyrics: () -> Unit
+    onShowLyrics: () -> Unit,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
 ) {
     val displayWeight by animateFloatAsState(
         targetValue = if (isExpanded) 1.2f else 0.75f,
@@ -298,7 +325,9 @@ fun iPodDeviceFrame(
             showCreatePlaylistDialog = showCreatePlaylistDialog,
             onAddTrackToPlaylist = onAddTrackToPlaylist,
             onShowLyrics = onShowLyrics,
-            onDisplayClick = { isFullScreen = !isFullScreen }
+            onDisplayClick = { isFullScreen = !isFullScreen },
+            currentUser = currentUser,
+            onLogout = onLogout
         )
 
         AnimatedVisibility(
@@ -426,7 +455,9 @@ fun iPodScreenDisplay(
     showCreatePlaylistDialog: () -> Unit,
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
-    onDisplayClick: () -> Unit
+    onDisplayClick: () -> Unit,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val currentTrack by viewModel.currentTrack.collectAsState()
@@ -529,7 +560,7 @@ fun iPodScreenDisplay(
         // 3. ACTUAL DISPLAY LAYOUT
         Column(modifier = Modifier.fillMaxSize()) {
             // A. TOP APPLE-STYLE STATUS BAR
-            iPodStatusBar(currentTrack)
+            iPodStatusBar(currentTrack, currentUser, onLogout)
 
             // B. SCREEN INNER CONTENT (PAGER OR SUBVIEW)
             Box(
@@ -586,7 +617,11 @@ fun iPodScreenDisplay(
 }
 
 @Composable
-fun iPodStatusBar(currentTrack: Track?) {
+fun iPodStatusBar(
+    currentTrack: Track?,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -594,7 +629,7 @@ fun iPodStatusBar(currentTrack: Track?) {
             .background(Color.Black.copy(alpha = 0.2f))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         val displayStr = if (currentTrack != null) {
             "${currentTrack.title} • ${currentTrack.artist}"
@@ -607,8 +642,23 @@ fun iPodStatusBar(currentTrack: Track?) {
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
+        if (currentUser != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onLogout() }
+            ) {
+                Text(
+                    text = "Logout",
+                    color = iPodAccentBlue,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
     }
 }
 
