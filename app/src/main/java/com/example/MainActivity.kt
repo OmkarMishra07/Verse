@@ -13,6 +13,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -42,6 +43,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -433,7 +435,7 @@ fun iPodScreenDisplay(
     val isLoading by viewModel.isLoading.collectAsState()
 
     // Horizontal pager state for swipeable pages
-    val pagerState = rememberPagerState(initialPage = 5, pageCount = { 6 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 6 })
     
     // Mapping pages to ScreenType index
     val pageToScreen = listOf(
@@ -535,9 +537,12 @@ fun iPodScreenDisplay(
                     .fillMaxWidth()
                     .weight(1f)
             ) {
+                val isOverlayScreen = currentScreen == ScreenType.PLAYLIST_DETAIL || currentScreen == ScreenType.EXPLORE_SECTION
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(if (isOverlayScreen) 0f else 1f),
                     userScrollEnabled = isExpanded,
                     beyondViewportPageCount = 6
                 ) { pageIndex ->
@@ -561,6 +566,9 @@ fun iPodScreenDisplay(
 
                 if (currentScreen == ScreenType.PLAYLIST_DETAIL) {
                     PlaylistDetailScreen(viewModel = viewModel)
+                }
+                if (currentScreen == ScreenType.EXPLORE_SECTION) {
+                    ExploreSectionScreen(viewModel = viewModel)
                 }
             }
 
@@ -1048,89 +1056,238 @@ fun NowPlayingScreen(
 @Composable
 fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val focusedIndex by viewModel.focusedIndex.collectAsState()
-    val listState = rememberLazyListState()
+    val exploreRegion by viewModel.exploreRegion.collectAsState()
+    val trendingSongs by viewModel.trendingSongs.collectAsState()
+    val trendingAlbums by viewModel.trendingAlbums.collectAsState()
+    val newReleases by viewModel.newReleases.collectAsState()
+    val bollywoodHits by viewModel.bollywoodHits.collectAsState()
+    val isLoading by viewModel.isExploreLoading.collectAsState()
+    
+    val pageScrollState = rememberScrollState()
+    val songsRowState = rememberLazyListState()
+    val albumsRowState = rememberLazyListState()
+    val releasesRowState = rememberLazyListState()
+    val bollywoodRowState = rememberLazyListState()
 
-    // Scroll to match Wheel rotation
+    val top10RowState = rememberLazyListState()
+    val top10Hits = trendingSongs.take(10)
+
+    val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits
+
     LaunchedEffect(focusedIndex) {
-        if (focusedIndex in 0 until CuratedTracks.allCurated.size) {
-            listState.animateScrollToItem(focusedIndex)
+        if (flatList.isEmpty()) return@LaunchedEffect
+        
+        if (focusedIndex < top10Hits.size) {
+            top10RowState.animateScrollToItem(maxOf(0, focusedIndex))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size) {
+            val idx = focusedIndex - top10Hits.size
+            songsRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size
+            albumsRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size
+            releasesRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < flatList.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size
+            bollywoodRowState.animateScrollToItem(maxOf(0, idx))
         }
     }
 
-    LazyColumn(
-        state = listState,
+    if (isLoading && flatList.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(32.dp))
+        }
+        return
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp),
-        contentPadding = PaddingValues(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .verticalScroll(pageScrollState)
+            .padding(vertical = 16.dp)
     ) {
-        item {
-            Text(
-                text = "Trending Now",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-        }
-
-        itemsIndexed(CuratedTracks.allCurated) { index, track ->
-            val isFocused = index == focusedIndex
-            
+        // Top Header: Search Bar & Region Toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Fake Search Bar
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (isFocused) Color.White.copy(alpha = 0.15f)
-                        else Color.White.copy(alpha = 0.03f)
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                    .clickable { viewModel.selectAndPlayTrack(track) }
-                    .padding(8.dp),
+                    .weight(1f)
+                    .height(40.dp)
+                    .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(20.dp))
+                    .clickable { viewModel.setScreen(ScreenType.SEARCH) }
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AsyncImage(
-                    model = track.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                )
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = track.artist,
-                        color = Color.White.copy(0.6f),
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
+                Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.White.copy(0.6f), modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("What do you want to listen to?", color = Color.White.copy(0.5f), fontSize = 12.sp)
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // Region Toggle Button
+            val isIndia = exploreRegion == MusicPlayerViewModel.ExploreRegion.INDIA
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .clickable { 
+                        viewModel.setExploreRegion(if (isIndia) MusicPlayerViewModel.ExploreRegion.GLOBAL else MusicPlayerViewModel.ExploreRegion.INDIA)
+                    }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
                 Text(
-                    text = track.duration,
-                    color = Color.White.copy(0.4f),
-                    fontSize = 11.sp
+                    text = if (isIndia) "IN" else "GL",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
+
+        if (top10Hits.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Top 10 Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top 10 Hits", top10Hits) })
+            }
+            LazyRow(
+                state = top10RowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(top10Hits) { index, track ->
+                    val isFocused = index == focusedIndex
+                    RankedSpotifyCard(track = track, rank = index + 1, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (trendingSongs.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Top Trending Songs", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top Trending Songs", trendingSongs) })
+            }
+            val offset = top10Hits.size
+            LazyRow(
+                state = songsRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(trendingSongs.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+        
+        if (trendingAlbums.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Trending Albums", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Trending Albums", trendingAlbums) })
+            }
+            val offset = top10Hits.size + trendingSongs.size
+            LazyRow(
+                state = albumsRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(trendingAlbums.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (newReleases.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("New Releases", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("New Releases", newReleases) })
+            }
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size
+            LazyRow(
+                state = releasesRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(newReleases.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (bollywoodHits.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Bollywood Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Bollywood Hits", bollywoodHits) })
+            }
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size
+            LazyRow(
+                state = bollywoodRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(bollywoodHits.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+fun SpotifyCard(track: Track, isFocused: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(130.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.Transparent)
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) iPodAccentBlue else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable { onClick() }
+            .padding(8.dp)
+    ) {
+        AsyncImage(
+            model = track.thumbnailUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(6.dp))
+                .shadow(4.dp, RoundedCornerShape(6.dp))
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = track.title,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = track.artist,
+            color = Color.White.copy(alpha = 0.6f),
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1916,4 +2073,158 @@ fun Greeting(name: String, modifier: Modifier = Modifier) {
     )
 }
 
+@Composable
+fun RankedSpotifyCard(track: Track, rank: Int, isFocused: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .width(220.dp)
+            .height(70.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f))
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) iPodAccentBlue else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable { onClick() }
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = rank.toString(),
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.width(36.dp),
+            textAlign = TextAlign.Center
+        )
+        AsyncImage(
+            model = track.thumbnailUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .shadow(4.dp, RoundedCornerShape(6.dp))
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = track.artist,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
 
+@Composable
+fun ExploreSectionScreen(viewModel: MusicPlayerViewModel) {
+    val title by viewModel.sectionDetailTitle.collectAsState()
+    val tracks by viewModel.sectionDetailTracks.collectAsState()
+    val focusedIndex by viewModel.focusedIndex.collectAsState()
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(focusedIndex) {
+        if (focusedIndex in tracks.indices) {
+            listState.animateScrollToItem(focusedIndex)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            IconButton(
+                onClick = { viewModel.setScreen(ScreenType.EXPLORE) },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = iPodAccentBlue
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            itemsIndexed(tracks) { index, track ->
+                val isFocused = index == focusedIndex
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isFocused) Color.White.copy(alpha = 0.15f)
+                            else Color.White.copy(alpha = 0.03f)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { viewModel.selectAndPlayTrack(track, tracks) }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = track.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = track.title,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = track.artist,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

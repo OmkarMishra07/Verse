@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.MusicPlaybackService
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.data.network.ITunesHelper
 import com.example.data.network.YouTubeSearchHelper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -21,7 +22,8 @@ enum class ScreenType(val title: String) {
     NOW_PLAYING("Now Playing"),
     QUEUE("Queue"),
     SEARCH("Search"),
-    PLAYLIST_DETAIL("Playlist Details")
+    PLAYLIST_DETAIL("Playlist Details"),
+    EXPLORE_SECTION("Explore Section")
 }
 
 enum class RepeatMode {
@@ -37,11 +39,73 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _isExpanded = MutableStateFlow(true)
     val isExpanded = _isExpanded.asStateFlow()
 
-    private val _currentScreen = MutableStateFlow(ScreenType.NOW_PLAYING)
+    private val _currentScreen = MutableStateFlow(ScreenType.EXPLORE)
     val currentScreen = _currentScreen.asStateFlow()
 
     private val _showQuickAccess = MutableStateFlow(false)
     val showQuickAccess = _showQuickAccess.asStateFlow()
+
+    enum class ExploreRegion { GLOBAL, INDIA }
+    
+    private val _exploreRegion = MutableStateFlow(ExploreRegion.GLOBAL)
+    val exploreRegion = _exploreRegion.asStateFlow()
+
+    private val _trendingSongs = MutableStateFlow<List<Track>>(emptyList())
+    val trendingSongs = _trendingSongs.asStateFlow()
+
+    private val _trendingAlbums = MutableStateFlow<List<Track>>(emptyList())
+    val trendingAlbums = _trendingAlbums.asStateFlow()
+
+    private val _newReleases = MutableStateFlow<List<Track>>(emptyList())
+    val newReleases = _newReleases.asStateFlow()
+
+    private val _bollywoodHits = MutableStateFlow<List<Track>>(emptyList())
+    val bollywoodHits = _bollywoodHits.asStateFlow()
+
+    private val _isExploreLoading = MutableStateFlow(false)
+    val isExploreLoading = _isExploreLoading.asStateFlow()
+
+    private val _sectionDetailTitle = MutableStateFlow("")
+    val sectionDetailTitle = _sectionDetailTitle.asStateFlow()
+
+    private val _sectionDetailTracks = MutableStateFlow<List<Track>>(emptyList())
+    val sectionDetailTracks = _sectionDetailTracks.asStateFlow()
+
+    fun openExploreSection(title: String, tracks: List<Track>) {
+        _sectionDetailTitle.value = title
+        _sectionDetailTracks.value = tracks
+        setScreen(ScreenType.EXPLORE_SECTION)
+    }
+
+    fun setExploreRegion(region: ExploreRegion) {
+        _exploreRegion.value = region
+        fetchExploreContent()
+    }
+
+    private fun fetchExploreContent() {
+        viewModelScope.launch {
+            _isExploreLoading.value = true
+            try {
+                val isIndia = _exploreRegion.value == ExploreRegion.INDIA
+                
+                val trendingResults = ITunesHelper.getTopSongs(isIndia)
+                _trendingSongs.value = trendingResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
+                
+                val albumsResults = ITunesHelper.getTopAlbums(isIndia)
+                _trendingAlbums.value = albumsResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
+                
+                val newReleasesResults = ITunesHelper.getNewReleases(isIndia)
+                _newReleases.value = newReleasesResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
+
+                val bollywoodResults = YouTubeSearchHelper.search("latest trending bollywood hit songs")
+                _bollywoodHits.value = bollywoodResults.map { it.toTrack("Bollywood Hits") }
+            } catch (e: Exception) {
+                Log.e("MusicPlayerViewModel", "Error fetching explore content: ${e.message}")
+            } finally {
+                _isExploreLoading.value = false
+            }
+        }
+    }
 
     private val _quickAccessSelection = MutableStateFlow(0)
     val quickAccessSelection = _quickAccessSelection.asStateFlow()
@@ -231,6 +295,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             currentQueueIndex.collect { savedQueueIndex = it }
         }
 
+        fetchExploreContent()
+
         // Handle live search debouncing
         viewModelScope.launch {
             _searchQuery
@@ -304,13 +370,35 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         return songDao.isLiked(videoId)
     }
 
+    private suspend fun playResolvedTrack(track: Track) {
+        _isLoading.value = true
+        val resolved = if (track.id.startsWith("itunes_")) {
+            try {
+                val query = "${track.title} ${track.artist} audio"
+                val results = YouTubeSearchHelper.search(query)
+                if (results.isNotEmpty()) {
+                    val yt = results.first()
+                    track.copy(id = yt.videoId, duration = yt.duration)
+                } else {
+                    track
+                }
+            } catch (e: Exception) {
+                track
+            }
+        } else {
+            track
+        }
+        _isLoading.value = false
+        _currentPositionMs.value = 0L
+        _currentTrack.value = resolved
+        _isPlaying.value = true
+        
+        songDao.insertRecentlyPlayed(resolved.toRecentlyPlayed())
+    }
+
     // Playback controls
     fun selectAndPlayTrack(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
-            _currentPositionMs.value = 0L
-            _currentTrack.value = track
-            _isPlaying.value = true
-
             // Re-order or set queue
             val idx = newQueue.indexOfFirst { it.id == track.id }
             if (idx != -1) {
@@ -322,11 +410,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 _currentQueueIndex.value = 0
             }
 
-            // Save to recently played
-            songDao.insertRecentlyPlayed(track.toRecentlyPlayed())
-
             // Go to the Now Playing screen.
             setScreen(ScreenType.NOW_PLAYING)
+            
+            playResolvedTrack(track)
         }
     }
 
@@ -371,13 +458,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         
         val actualNextIdx = nextIdx % q.size
         _currentQueueIndex.value = actualNextIdx
-        _currentPositionMs.value = 0L
-        _currentTrack.value = q[actualNextIdx]
-        _isPlaying.value = true
         
-        // Save to recently played
         viewModelScope.launch {
-            songDao.insertRecentlyPlayed(q[actualNextIdx].toRecentlyPlayed())
+            playResolvedTrack(q[actualNextIdx])
         }
     }
 
@@ -392,12 +475,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         } else {
             val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
             _currentQueueIndex.value = prevIdx
-            _currentPositionMs.value = 0L
-            _currentTrack.value = q[prevIdx]
-            _isPlaying.value = true
             
             viewModelScope.launch {
-                songDao.insertRecentlyPlayed(q[prevIdx].toRecentlyPlayed())
+                playResolvedTrack(q[prevIdx])
             }
         }
     }
@@ -549,10 +629,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun getActiveListSize(): Int {
         return when (_currentScreen.value) {
-            ScreenType.EXPLORE -> CuratedTracks.allCurated.size
+            ScreenType.EXPLORE -> _trendingSongs.value.take(10).size + _trendingSongs.value.size + _trendingAlbums.value.size + _newReleases.value.size + _bollywoodHits.value.size
             ScreenType.LIKED -> likedTracks.value.size
             ScreenType.PLAYLISTS -> playlists.value.size + 1 // +1 for "Create Playlist" row
             ScreenType.PLAYLIST_DETAIL -> selectedPlaylistSongs.value.size
+            ScreenType.EXPLORE_SECTION -> _sectionDetailTracks.value.size
             ScreenType.QUEUE -> queue.value.size
             ScreenType.SEARCH -> searchResults.value.size
             ScreenType.NOW_PLAYING -> 0
@@ -563,9 +644,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val index = _focusedIndex.value
         when (_currentScreen.value) {
             ScreenType.EXPLORE -> {
-                val list = CuratedTracks.allCurated
-                if (index in list.indices) {
-                    selectAndPlayTrack(list[index])
+                val flatList = _trendingSongs.value.take(10) + _trendingSongs.value + _trendingAlbums.value + _newReleases.value + _bollywoodHits.value
+                if (index in flatList.indices) {
+                    selectAndPlayTrack(flatList[index], flatList)
                 }
             }
             ScreenType.LIKED -> {
@@ -587,6 +668,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
             ScreenType.PLAYLIST_DETAIL -> {
                 val list = selectedPlaylistSongs.value
+                if (index in list.indices) {
+                    selectAndPlayTrack(list[index], list)
+                }
+            }
+            ScreenType.EXPLORE_SECTION -> {
+                val list = _sectionDetailTracks.value
                 if (index in list.indices) {
                     selectAndPlayTrack(list[index], list)
                 }
