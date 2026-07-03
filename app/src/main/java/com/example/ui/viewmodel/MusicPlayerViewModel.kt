@@ -23,7 +23,8 @@ enum class ScreenType(val title: String) {
     QUEUE("Queue"),
     SEARCH("Search"),
     PLAYLIST_DETAIL("Playlist Details"),
-    EXPLORE_SECTION("Explore Section")
+    EXPLORE_SECTION("Explore Section"),
+    JAMMING("Jamming Session")
 }
 
 enum class RepeatMode {
@@ -701,6 +702,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             ScreenType.QUEUE -> queue.value.size
             ScreenType.SEARCH -> searchResults.value.size
             ScreenType.NOW_PLAYING -> 0
+            ScreenType.JAMMING -> 0
         }
     }
 
@@ -756,6 +758,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
             ScreenType.NOW_PLAYING -> {
                 // Return or toggle details
+            }
+            ScreenType.JAMMING -> {
+                // Jamming session action
             }
         }
     }
