@@ -6,6 +6,7 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -146,6 +147,22 @@ fun iPodPlayerApp(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val currentTrack by viewModel.currentTrack.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+
+    // Back navigation logic
+    var backPressTime by remember { mutableLongStateOf(0L) }
+    BackHandler {
+        if (currentScreen != ScreenType.EXPLORE) {
+            viewModel.setScreen(ScreenType.EXPLORE)
+        } else {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - backPressTime < 2000) {
+                (context as? android.app.Activity)?.finish()
+            } else {
+                backPressTime = currentTime
+                Toast.makeText(context, "Swipe again to exit", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // Base layout: Metallic iPod Hardware Device Frame
     iPodDeviceFrame(
@@ -646,9 +663,11 @@ fun iPodStatusBar(
             text = "Verse",
             color = Color.White.copy(alpha = 0.9f),
             fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
+            fontWeight = FontWeight.SemiBold
         )
+        
+        Spacer(modifier = Modifier.weight(1f))
+        
         if (currentUser != null) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1394,54 +1413,127 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text(
-            text = "Liked Songs",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Liked Songs Cover
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Brush.linearGradient(listOf(Color(0xFF00C6FF), Color(0xFF0072FF))))
+                        .shadow(12.dp, RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Liked Songs",
+                        color = Color.White,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${likedTracks.size} songs",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                
+                // Play Button
+                if (likedTracks.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(Color(0xFF00F2FE), Color(0xFF4FACFE))))
+                            .shadow(8.dp, CircleShape)
+                            .clickable { viewModel.selectAndPlayTrack(likedTracks.first(), likedTracks) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         if (likedTracks.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         imageVector = Icons.Default.FavoriteBorder,
                         contentDescription = null,
                         tint = Color.Gray,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("No liked songs yet.", color = Color.Gray, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Songs you like will appear here", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Save songs by tapping the heart icon.", color = Color.Gray, fontSize = 12.sp)
                 }
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(likedTracks) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.White.copy(alpha = 0.05f)
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { viewModel.selectAndPlayTrack(track, likedTracks) }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text(
+                            text = "${index + 1}",
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White.copy(alpha = 0.5f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(28.dp)
+                        )
+
                         AsyncImage(
                             model = track.thumbnailUrl,
                             contentDescription = null,
@@ -1459,8 +1551,8 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         ) {
                             Text(
                                 text = track.title,
-                                color = Color.White,
-                                fontSize = 13.sp,
+                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1468,7 +1560,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                             Text(
                                 text = track.artist,
                                 color = Color.White.copy(0.6f),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1480,7 +1572,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Favorite,
-                                tint = iPodAccentBlue,
+                                tint = Color(0xFF1DB954), // Spotify Green heart
                                 contentDescription = "Liked",
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1513,15 +1605,24 @@ fun PlaylistsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text(
-            text = "Playlists",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Text(
+                text = "Your Library",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
 
         LazyColumn(
             state = listState,
@@ -1534,82 +1635,115 @@ fun PlaylistsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else Color.White.copy(alpha = 0.03f)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.White.copy(alpha = 0.05f)
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onCreatePlaylistClick() }
-                        .padding(12.dp),
+                        .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        tint = iPodAccentBlue,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(Color.White.copy(0.2f), Color.White.copy(0.05f)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Text(
                         text = "Create Playlist",
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
             // Playlist items (Index shifted by +1)
-            itemsIndexed(playlists) { index, playlist ->
-                val listIdx = index + 1
-                val isFocused = listIdx == focusedIndex
-
+            itemsIndexed(playlists) { i, playlist ->
+                val index = i + 1 // Offset by 1 for the Create Playlist item
+                val isFocused = index == focusedIndex
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else Color.White.copy(alpha = 0.03f)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.White.copy(alpha = 0.05f)
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { viewModel.selectPlaylist(playlist) }
-                        .padding(12.dp),
+                        .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.QueueMusic,
-                        contentDescription = null,
-                        tint = Color.White.copy(0.6f),
-                        modifier = Modifier.size(24.dp)
+                    // Generate a pseudo-random gradient for each playlist based on its ID
+                    val pid = playlist.id.toInt()
+                    val colors = listOf(
+                        Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4),
+                        Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    val color1 = colors[(pid * 3) % colors.size]
+                    val color2 = colors[(pid * 7 + 1) % colors.size]
+
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(color1, color2)))
+                            .shadow(4.dp, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QueueMusic,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = playlist.name,
-                            color = Color.White,
-                            fontSize = 13.sp,
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Playlist • You",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp
                         )
                     }
                     IconButton(
                         onClick = { viewModel.deletePlaylist(playlist.id) },
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete Playlist",
-                            tint = Color.White.copy(alpha = 0.4f),
-                            modifier = Modifier.size(16.dp)
+                            tint = Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -1637,43 +1771,115 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        // Row header with back navigation
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
         ) {
-            IconButton(
-                onClick = { viewModel.setScreen(ScreenType.PLAYLISTS) },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = iPodAccentBlue
-                )
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                ) {
+                    IconButton(
+                        onClick = { viewModel.setScreen(ScreenType.PLAYLISTS) },
+                        modifier = Modifier.size(28.dp).background(Color.Black.copy(alpha=0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    }
+                }
+                
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Playlist Cover (Gradient based on ID, same as PlaylistsScreen)
+                    val pid = (playlist?.id ?: 0).toInt()
+                    val colors = listOf(
+                        Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4),
+                        Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688)
+                    )
+                    val color1 = colors[(pid * 3) % colors.size]
+                    val color2 = colors[(pid * 7 + 1) % colors.size]
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(color1, color2)))
+                            .shadow(12.dp, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QueueMusic,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = playlist?.name ?: "Playlist Detail",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Playlist • ${songs.size} songs",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    
+                    if (songs.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(Color(0xFF00F2FE), Color(0xFF4FACFE))))
+                                .shadow(8.dp, CircleShape)
+                                .clickable { viewModel.selectAndPlayTrack(songs.first(), songs) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = playlist?.name ?: "Playlist Detail",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
 
         if (songs.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Playlist is empty. Add songs!", color = Color.Gray, fontSize = 12.sp)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Playlist is empty. Add songs!", color = Color.Gray, fontSize = 14.sp)
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(songs) { index, track ->
                     val isFocused = index == focusedIndex
@@ -1681,20 +1887,28 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.White.copy(alpha = 0.05f)
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { viewModel.selectAndPlayTrack(track, songs) }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text(
+                            text = "${index + 1}",
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White.copy(alpha = 0.5f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(28.dp)
+                        )
+                        
                         AsyncImage(
                             model = track.thumbnailUrl,
                             contentDescription = null,
@@ -1765,12 +1979,21 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             .fillMaxSize()
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
+        // Modern Search Header
+        Text(
+            text = "Search",
+            color = Color.White,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(bottom = 12.dp, top = 12.dp)
+        )
+
         // Material3 search text field with system keyboard triggers
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("Search YouTube...", color = Color.White.copy(0.4f), fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(0.6f)) },
+            placeholder = { Text("What do you want to listen to?", color = Color.White.copy(0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { viewModel.setSearchQuery("") }) {
@@ -1780,54 +2003,90 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.02f),
-                focusedBorderColor = iPodAccentBlue,
-                unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                focusedTextColor = Color.Black,
+                unfocusedTextColor = Color.Black,
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(52.dp)
                 .testTag("youtube_search_input")
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
         if (isSearching) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(30.dp))
             }
         } else if (results.isEmpty() && query.isNotBlank()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("No matching YouTube videos found.", color = Color.Gray, fontSize = 12.sp)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No matching YouTube videos found.", color = Color.White, fontSize = 14.sp)
             }
         } else if (results.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Type above to search online music.", color = Color.Gray, fontSize = 12.sp)
+            // Browse All Section
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Browse All",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            val genres = listOf("Pop", "Hip-Hop", "Rock", "Electronic", "Classical", "Jazz", "Bollywood", "K-Pop")
+            val colors = listOf(Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4), Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688))
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(genres.size / 2) { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        for (col in 0..1) {
+                            val index = row * 2 + col
+                            if (index < genres.size) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(90.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors[index % colors.size])
+                                        .clickable { viewModel.setSearchQuery(genres[index]) }
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = genres[index],
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
+            Spacer(modifier = Modifier.height(16.dp))
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(results) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.Transparent
                             )
                             .clickable {
                                 focusManager.clearFocus()
@@ -1841,17 +2100,17 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(4.dp))
                         )
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title,
-                                color = Color.White,
-                                fontSize = 12.sp,
+                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1896,20 +2155,26 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .background(Color(0xFF121212))
     ) {
-        Text(
-            text = "Playback Queue",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Spotify-inspired Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 20.dp)
+        ) {
+            Text(
+                text = "Queue",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(queue) { index, track ->
                 val isFocused = index == focusedIndex
@@ -1918,18 +2183,10 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else if (isActivePlaying) iPodAccentBlue.copy(alpha = 0.08f)
-                            else Color.White.copy(alpha = 0.03f)
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) 
-                                    else if (isActivePlaying) iPodAccentBlue.copy(alpha = 0.3f) 
-                                    else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.Transparent
                         )
                         .clickable { viewModel.selectAndPlayTrack(track) }
                         .padding(8.dp),
@@ -1940,17 +2197,17 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(4.dp))
                     )
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = track.title,
-                            color = if (isActivePlaying) iPodAccentBlue else Color.White,
-                            fontSize = 12.sp,
+                            color = if (isActivePlaying) Color(0xFF1DB954) else if (isFocused) iPodAccentBlue else Color.White,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1958,19 +2215,18 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                         Text(
                             text = track.artist,
                             color = Color.White.copy(0.6f),
-                            fontSize = 10.sp,
+                            fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     if (isActivePlaying) {
-                        Text(
-                            text = "Playing",
-                            color = iPodAccentBlue,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 6.dp)
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Playing",
+                            tint = Color(0xFF1DB954),
+                            modifier = Modifier.padding(end = 6.dp).size(20.dp)
                         )
                     }
 
