@@ -664,35 +664,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    // Auth sync
-    fun onUserLoggedIn(uid: String) {
-        if (currentUserId == uid) return
-        currentUserId = uid
-        viewModelScope.launch {
-            // First time login on this device? We merge/pull from Firestore.
-            val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
-            firestoreLiked.forEach { songDao.insertLikedSong(it) }
 
-            val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
-            firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
-
-            val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
-            firestorePlaylists.forEach { (playlist, songs) ->
-                songDao.insertPlaylist(playlist)
-                songs.forEach { songDao.insertPlaylistSong(it) }
-            }
-        }
-    }
-
-    fun onUserLoggedOut() {
-        currentUserId = null
-        viewModelScope.launch {
-            songDao.clearAllData()
-            _queue.value = emptyList()
-            _currentQueueIndex.value = 0
-            _currentTrack.value = null
-        }
-    }
     // Queue Management
     fun addToQueue(track: Track) {
         val updated = _queue.value.toMutableList()

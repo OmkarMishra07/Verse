@@ -197,11 +197,15 @@ object WebViewHolder {
         if (window.AndroidPlayerBridge) AndroidPlayerBridge.onPlayerReady();
         event.target.playVideo();
         setInterval(function() {
-          if (player && player.getCurrentTime && player.getPlayerState() == 1) {
-            if (window.AndroidPlayerBridge) {
-              AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
-              AndroidPlayerBridge.onVideoDuration(player.getDuration());
+          try {
+            if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {
+              if (window.AndroidPlayerBridge) {
+                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
+                AndroidPlayerBridge.onVideoDuration(player.getDuration());
+              }
             }
+          } catch (e) {
+            console.error("Timer error: ", e);
           }
         }, 500);
       }
