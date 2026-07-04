@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"
@@ -16,6 +17,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -24,16 +26,34 @@
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!--
+            VerseMusicService is a MediaSessionService (from Media3).
+            - foregroundServiceType="mediaPlayback" is required from Android 14+ (API 34)
+              Without it, startForeground() crashes on new devices.
+            - The androidx.media3.session.MediaSessionService intent-filter is required
+              for Media3's MediaController and system media controls to discover this service.
+            - MusicPlaybackService (old) is kept in case anything still references it,
+              but VerseMusicService is the authoritative service going forward.
+        -->
+        <service
+            android:name=".VerseMusicService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
+        <!-- Legacy service stub — kept to avoid any remaining references from crashing -->
         <service
             android:name=".MusicPlaybackService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="false">
-        </service>
+            android:exported="false" />
+
     </application>
 
 </manifest>

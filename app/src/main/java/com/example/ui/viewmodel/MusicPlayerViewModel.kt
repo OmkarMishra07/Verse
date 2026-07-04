@@ -5,7 +5,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.MusicPlaybackService
+import com.example.VerseMusicService
 import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.network.ITunesHelper
@@ -149,10 +149,13 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     val currentTrack = _currentTrack.asStateFlow()
 
     private val _isPlaying = MutableStateFlow(false)
-    val isPlaying = _isPlaying.asStateFlow()
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
+
+    private val _playTrigger = MutableStateFlow(0)
+    val playTrigger: StateFlow<Int> = _playTrigger.asStateFlow()
 
     private val _currentPositionMs = MutableStateFlow(0L)
     val currentPositionMs = _currentPositionMs.asStateFlow()
@@ -174,9 +177,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    private var lastSeekTime = 0L
+
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
+        lastSeekTime = System.currentTimeMillis()
     }
 
     fun clearSeekRequest() {
@@ -184,7 +190,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     // Playback Queue
-    private val _queue = MutableStateFlow<List<Track>>(CuratedTracks.allCurated)
+    private val _queue = MutableStateFlow<List<Track>>(emptyList())
     val queue = _queue.asStateFlow()
 
     private val _currentQueueIndex = MutableStateFlow(0)
@@ -227,6 +233,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _volume = MutableStateFlow(0.7f) // 0.0f to 1.0f
     val volume = _volume.asStateFlow()
 
+    fun setVolume(vol: Float) {
+        _volume.value = vol.coerceIn(0f, 1f)
+    }
+
     private val _focusedIndex = MutableStateFlow(0)
     val focusedIndex = _focusedIndex.asStateFlow()
 
@@ -251,13 +261,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (savedPositionMs == 0L) {
             savedPositionMs = prefs.getLong("last_position_ms", 0L)
         }
+        if (savedQueue == null) {
+            val queueJson = prefs.getString("last_queue_json", null)
+            if (queueJson != null) {
+                savedQueue = deserializeTrackList(queueJson)
+            }
+        }
+        if (savedQueueIndex == 0) {
+            savedQueueIndex = prefs.getInt("last_queue_index", 0)
+        }
 
         // Restore state if saved, otherwise use defaults
-        _currentTrack.value = savedTrack ?: CuratedTracks.trending.first()
+        _currentTrack.value = savedTrack   // null if nothing was ever played
         _isPlaying.value = savedIsPlaying
         _currentPositionMs.value = savedPositionMs
         _durationMs.value = savedDurationMs
-        _queue.value = savedQueue ?: CuratedTracks.allCurated
+        _queue.value = savedQueue ?: emptyList()
         _currentQueueIndex.value = savedQueueIndex
 
         // Persist state updates to companion object and SharedPreferences
@@ -289,10 +308,16 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             durationMs.collect { savedDurationMs = it }
         }
         viewModelScope.launch {
-            queue.collect { savedQueue = it }
+            queue.collect { q ->
+                savedQueue = q
+                prefs.edit().putString("last_queue_json", serializeTrackList(q)).apply()
+            }
         }
         viewModelScope.launch {
-            currentQueueIndex.collect { savedQueueIndex = it }
+            currentQueueIndex.collect { idx ->
+                savedQueueIndex = idx
+                prefs.edit().putInt("last_queue_index", idx).apply()
+            }
         }
 
         fetchExploreContent()
@@ -308,6 +333,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     try {
                         val results = YouTubeSearchHelper.search(query)
                         _searchResults.value = results.map { it.toTrack() }
+                        _focusedIndex.value = 0
                     } catch (e: Exception) {
                         Log.e("MusicPlayerViewModel", "Search failure: ${e.message}")
                     } finally {
@@ -316,30 +342,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 }
         }
 
-        // Start / Stop the Foreground Service based on track and playing state
+        // Start VerseMusicService (MediaSessionService) when playback is active.
+        // We call startService(intent) rather than startForegroundService to prevent
+        // ForegroundServiceDidNotStartInTimeException if there is a delay (e.g. buffering).
+        // Once playback actually starts, Media3's MediaSessionService will automatically
+        // promote itself to the foreground and show the notification.
         viewModelScope.launch {
             combine(currentTrack, isPlaying) { track, playing ->
                 track to playing
             }.collect { (track, playing) ->
                 val context = getApplication<Application>()
-                val intent = Intent(context, MusicPlaybackService::class.java)
-                if (track != null) {
-                    intent.action = MusicPlaybackService.ACTION_UPDATE
+                val intent = Intent(context, VerseMusicService::class.java)
+                if (track != null && playing) {
                     try {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            context.startForegroundService(intent)
-                        } else {
-                            context.startService(intent)
-                        }
+                        context.startService(intent)
                     } catch (e: Exception) {
-                        Log.e("MusicPlayerViewModel", "Failed to start service: ${e.message}")
-                    }
-                } else {
-                    intent.action = MusicPlaybackService.ACTION_STOP
-                    try {
-                        context.stopService(intent)
-                    } catch (e: Exception) {
-                        Log.e("MusicPlayerViewModel", "Failed to stop service: ${e.message}")
+                        Log.e("MusicPlayerViewModel", "Failed to start VerseMusicService: ${e.message}")
                     }
                 }
             }
@@ -392,28 +410,84 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _currentPositionMs.value = 0L
         _currentTrack.value = resolved
         _isPlaying.value = true
+        _playTrigger.value += 1
+        lastSeekTime = System.currentTimeMillis()
         
         songDao.insertRecentlyPlayed(resolved.toRecentlyPlayed())
+    }
+
+    private suspend fun generateRelatedTracks(track: Track): List<Track> {
+        val existingIds = _queue.value.map { it.id }.toSet()
+        val list = mutableListOf<Track>()
+
+        // Strategy: use multiple query approaches like YouTube does for radio/mix
+        val queries = listOf(
+            "${track.artist} best songs",          // More songs from same artist
+            "${track.title} ${track.artist}",       // Exact match variants
+            "${track.artist} top hits"              // Top hits from artist
+        )
+
+        for (query in queries) {
+            if (list.size >= 10) break
+            try {
+                val results = YouTubeSearchHelper.search(query)
+                results.forEach { yt ->
+                    if (yt.videoId != track.id && yt.videoId !in existingIds && list.none { it.id == yt.videoId }) {
+                        list.add(
+                            Track(
+                                id = yt.videoId,
+                                title = yt.title,
+                                artist = yt.artist,
+                                album = "YouTube Radio",
+                                thumbnailUrl = yt.thumbnailUrl,
+                                duration = yt.duration
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MusicPlayerViewModel", "Error generating related tracks: ${e.message}")
+            }
+        }
+        return list
     }
 
     // Playback controls
     fun selectAndPlayTrack(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
-            // Re-order or set queue
-            val idx = newQueue.indexOfFirst { it.id == track.id }
-            if (idx != -1) {
-                _queue.value = newQueue
-                _currentQueueIndex.value = idx
-            } else {
-                val updated = listOf(track) + newQueue.filter { it.id != track.id }
-                _queue.value = updated
-                _currentQueueIndex.value = 0
-            }
+            // Check if this is a single song selection (e.g. from Search or history)
+            val isSingleSong = newQueue.size <= 1 || !newQueue.any { it.id == track.id }
 
-            // Go to the Now Playing screen.
-            setScreen(ScreenType.NOW_PLAYING)
-            
-            playResolvedTrack(track)
+            if (isSingleSong) {
+                // Start playing the track immediately with a single-item queue
+                _queue.value = listOf(track)
+                _currentQueueIndex.value = 0
+                setExpanded(false)
+                playResolvedTrack(track)
+
+                // Fetch related tracks in background and append to queue (non-blocking)
+                launch {
+                    val related = generateRelatedTracks(track)
+                    // Append to queue after current track
+                    val currentQueue = _queue.value.toMutableList()
+                    related.forEach { r ->
+                        if (currentQueue.none { it.id == r.id }) currentQueue.add(r)
+                    }
+                    _queue.value = currentQueue
+                }
+            } else {
+                val idx = newQueue.indexOfFirst { it.id == track.id }
+                if (idx != -1) {
+                    _queue.value = newQueue
+                    _currentQueueIndex.value = idx
+                } else {
+                    val updated = listOf(track) + newQueue.filter { it.id != track.id }
+                    _queue.value = updated
+                    _currentQueueIndex.value = 0
+                }
+                setExpanded(false)
+                playResolvedTrack(track)
+            }
         }
     }
 
@@ -430,6 +504,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateProgress(positionMs: Long) {
+        if (System.currentTimeMillis() - lastSeekTime < 1000L) {
+            return
+        }
         _currentPositionMs.value = positionMs
     }
 
@@ -449,11 +526,41 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val nextIdx = _currentQueueIndex.value + 1
-        if (nextIdx >= q.size && isAutoPlay && _repeatMode.value == RepeatMode.OFF) {
-            _isPlaying.value = false
-            _currentPositionMs.value = 0L
-            seekTo(0L)
-            return
+        if (nextIdx >= q.size) {
+            if (_repeatMode.value == RepeatMode.OFF) {
+                // Fetch related songs and append them dynamically!
+                viewModelScope.launch {
+                    _isLoading.value = true
+                    val lastTrack = q.lastOrNull() ?: currentTrack.value
+                    if (lastTrack != null) {
+                        val related = generateRelatedTracks(lastTrack).filter { track ->
+                            !q.any { it.id == track.id }
+                        }
+                        if (related.isNotEmpty()) {
+                            val updatedQueue = q + related
+                            _queue.value = updatedQueue
+                            _currentQueueIndex.value = nextIdx
+                            _isLoading.value = false
+                            playResolvedTrack(updatedQueue[nextIdx])
+                        } else {
+                            // If no related tracks found, stop or wrap around
+                            if (isAutoPlay) {
+                                _isPlaying.value = false
+                                _currentPositionMs.value = 0L
+                                seekTo(0L)
+                            } else {
+                                val actualNextIdx = nextIdx % q.size
+                                _currentQueueIndex.value = actualNextIdx
+                                playResolvedTrack(q[actualNextIdx])
+                            }
+                            _isLoading.value = false
+                        }
+                    } else {
+                        _isLoading.value = false
+                    }
+                }
+                return
+            }
         }
         
         val actualNextIdx = nextIdx % q.size
@@ -557,6 +664,35 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    // Auth sync
+    fun onUserLoggedIn(uid: String) {
+        if (currentUserId == uid) return
+        currentUserId = uid
+        viewModelScope.launch {
+            // First time login on this device? We merge/pull from Firestore.
+            val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
+            firestoreLiked.forEach { songDao.insertLikedSong(it) }
+
+            val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
+            firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
+
+            val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
+            firestorePlaylists.forEach { (playlist, songs) ->
+                songDao.insertPlaylist(playlist)
+                songs.forEach { songDao.insertPlaylistSong(it) }
+            }
+        }
+    }
+
+    fun onUserLoggedOut() {
+        currentUserId = null
+        viewModelScope.launch {
+            songDao.clearAllData()
+            _queue.value = emptyList()
+            _currentQueueIndex.value = 0
+            _currentTrack.value = null
+        }
+    }
     // Queue Management
     fun addToQueue(track: Track) {
         val updated = _queue.value.toMutableList()
@@ -701,6 +837,44 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (instance == this) {
             instance = null
         }
+    }
+
+    private fun serializeTrackList(tracks: List<Track>): String {
+        val array = org.json.JSONArray()
+        tracks.forEach { track ->
+            val obj = org.json.JSONObject()
+            obj.put("id", track.id)
+            obj.put("title", track.title)
+            obj.put("artist", track.artist)
+            obj.put("album", track.album)
+            obj.put("thumbnailUrl", track.thumbnailUrl)
+            obj.put("duration", track.duration)
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun deserializeTrackList(json: String): List<Track> {
+        val list = mutableListOf<Track>()
+        try {
+            val array = org.json.JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    Track(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        artist = obj.getString("artist"),
+                        album = obj.optString("album", ""),
+                        thumbnailUrl = obj.getString("thumbnailUrl"),
+                        duration = obj.getString("duration")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        return list
     }
 
     companion object {

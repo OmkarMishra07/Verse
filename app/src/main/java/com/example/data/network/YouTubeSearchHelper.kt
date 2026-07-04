@@ -40,7 +40,7 @@ object YouTubeSearchHelper {
             val parts = html.split("\"videoRenderer\":")
             for (i in 1 until parts.size) {
                 if (results.size >= 15) break
-                val part = parts[i]
+                val part = parts[i].take(3500)
                 
                 // Extract videoId
                 val videoId = extractValue(part, "\"videoId\":\"([a-zA-Z0-9_-]{11})\"") ?: continue
@@ -50,12 +50,18 @@ object YouTubeSearchHelper {
                 if (title == null) {
                     title = extractValue(part, "\"title\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]+)\"\\}\\}")
                 }
+                if (title == null) {
+                    title = extractValue(part, "\"title\":.*?\"text\":\"([^\"]+)\"")
+                }
                 title = title?.replace("\\u0026", "&")?.replace("\\\"", "\"") ?: "Unknown Video"
 
                 // Extract Artist / Channel Name
                 var artist = extractValue(part, "\"ownerText\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"\\}\\]")
                 if (artist == null) {
                     artist = extractValue(part, "\"longBylineText\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"\\}\\]")
+                }
+                if (artist == null) {
+                    artist = extractValue(part, "\"ownerText\":.*?\"text\":\"([^\"]+)\"")
                 }
                 artist = artist?.replace("\\u0026", "&") ?: "Unknown Artist"
 

@@ -122,4 +122,8 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+
+  // Media3 for foreground MediaSessionService, notification, BT/headset/lock-screen
+  implementation("androidx.media3:media3-session:1.4.1")
+  implementation("androidx.media3:media3-common:1.4.1")
 }

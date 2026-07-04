@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.data.local.Playlist
-import com.example.data.model.CuratedTracks
+
 import com.example.data.model.Track
 import com.example.data.model.toTrack
 import com.example.ui.components.ClickWheel
@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        checkBatteryOptimizations()
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -92,6 +93,27 @@ class MainActivity : ComponentActivity() {
                         iPodPlayerApp()
                     }
                 }
+            }
+        }
+    }
+
+    private fun checkBatteryOptimizations() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Optimize Background Playback")
+                    .setMessage("To prevent the Android system from cutting off music playback in the background, please disable battery optimization for Verse.")
+                    .setPositiveButton("Configure") { _, _ ->
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to open settings: ${e.message}")
+                        }
+                    }
+                    .setNegativeButton("Not Now", null)
+                    .show()
             }
         }
     }
