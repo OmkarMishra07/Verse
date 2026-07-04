@@ -4,8 +4,11 @@ import android.app.Application
 import android.os.Bundle
 import android.webkit.WebView
 import android.widget.Toast
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -56,11 +59,14 @@ import com.example.data.model.toTrack
 import com.example.ui.components.ClickWheel
 import com.example.ui.components.MiniYouTubePlayerBar
 import com.example.ui.components.YouTubeWebViewPlayer
+import com.example.ui.components.AuthScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.google.firebase.auth.FirebaseAuth
 import com.example.ui.theme.iPodAccentBlue
 import com.example.ui.theme.iPodChassis
 import com.example.ui.theme.iPodChassisDark
 import com.example.ui.theme.iPodDisplayBg
+import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.MusicPlayerViewModel
 import com.example.ui.viewmodel.ScreenType
 import kotlinx.coroutines.delay
@@ -90,7 +96,35 @@ class MainActivity : ComponentActivity() {
                             .padding(innerPadding),
                         contentAlignment = Alignment.Center
                     ) {
-                        iPodPlayerApp()
+                        val authViewModel: AuthViewModel = viewModel()
+                        val currentUser by authViewModel.currentUser.collectAsState()
+                        val musicViewModel: com.example.ui.viewmodel.MusicPlayerViewModel = viewModel()
+
+                        LaunchedEffect(currentUser) {
+                            val user = currentUser
+                            if (user != null) {
+                                com.example.data.remote.FirestoreService.initUserProfile(user)
+                                musicViewModel.onUserLoggedIn(user.uid)
+                            } else {
+                                musicViewModel.onUserLoggedOut()
+                            }
+                        }
+
+                        if (currentUser == null) {
+                            AuthScreen(
+                                onAuthSuccess = { user ->
+                                    // Directly update StateFlow — no waiting for AuthStateListener
+                                    authViewModel.onUserSignedIn(user)
+                                }
+                            )
+                        } else {
+                            iPodPlayerApp(
+                                currentUser = currentUser,
+                                onLogout = {
+                                    authViewModel.signOut()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -120,7 +154,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun iPodPlayerApp() {
+fun iPodPlayerApp(
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
+) {
     val context = LocalContext.current
     val viewModel: MusicPlayerViewModel = viewModel()
     
@@ -135,6 +172,22 @@ fun iPodPlayerApp() {
     val currentTrack by viewModel.currentTrack.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
 
+    // Back navigation logic
+    var backPressTime by remember { mutableLongStateOf(0L) }
+    BackHandler {
+        if (currentScreen != ScreenType.EXPLORE) {
+            viewModel.setScreen(ScreenType.EXPLORE)
+        } else {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - backPressTime < 2000) {
+                (context as? android.app.Activity)?.finish()
+            } else {
+                backPressTime = currentTime
+                Toast.makeText(context, "Swipe again to exit", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Base layout: Metallic iPod Hardware Device Frame
     iPodDeviceFrame(
         viewModel = viewModel,
@@ -142,7 +195,9 @@ fun iPodPlayerApp() {
         showCreatePlaylistDialog = { showCreatePlaylistDialog = true },
         playlistToAddTo = playlistToAddTo,
         onAddTrackToPlaylist = { playlistToAddTo = it },
-        onShowLyrics = { showLyricsDialog = true }
+        onShowLyrics = { showLyricsDialog = true },
+        currentUser = currentUser,
+        onLogout = onLogout
     )
 
     // Dialogue Overlay: Create Playlist
@@ -275,7 +330,9 @@ fun iPodDeviceFrame(
     showCreatePlaylistDialog: () -> Unit,
     playlistToAddTo: Track?,
     onAddTrackToPlaylist: (Track) -> Unit,
-    onShowLyrics: () -> Unit
+    onShowLyrics: () -> Unit,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
 ) {
     val displayWeight by animateFloatAsState(
         targetValue = if (isExpanded) 1.2f else 0.75f,
@@ -320,7 +377,9 @@ fun iPodDeviceFrame(
             showCreatePlaylistDialog = showCreatePlaylistDialog,
             onAddTrackToPlaylist = onAddTrackToPlaylist,
             onShowLyrics = onShowLyrics,
-            onDisplayClick = { isFullScreen = !isFullScreen }
+            onDisplayClick = { isFullScreen = !isFullScreen },
+            currentUser = currentUser,
+            onLogout = onLogout
         )
 
         AnimatedVisibility(
@@ -381,14 +440,14 @@ fun iPodDeviceFrame(
                     modifier = Modifier.padding(bottom = 8.dp),
                     onMenuClick = {
                         if (isExpanded) {
-                            val current = viewModel.currentScreen.value
-                            if (current == ScreenType.PLAYLIST_DETAIL) {
-                                viewModel.setScreen(ScreenType.PLAYLISTS)
+                            if (viewModel.currentScreen.value == ScreenType.JAMMING) {
+                                viewModel.setScreen(ScreenType.NOW_PLAYING)
                             } else {
-                                viewModel.setExpanded(false)
+                                viewModel.setScreen(ScreenType.JAMMING)
                             }
                         } else {
                             viewModel.setExpanded(true)
+                            viewModel.setScreen(ScreenType.JAMMING)
                         }
                     },
                     onPrevClick = {
@@ -448,7 +507,9 @@ fun iPodScreenDisplay(
     showCreatePlaylistDialog: () -> Unit,
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
-    onDisplayClick: () -> Unit
+    onDisplayClick: () -> Unit,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val currentTrack by viewModel.currentTrack.collectAsState()
@@ -457,7 +518,7 @@ fun iPodScreenDisplay(
     val isLoading by viewModel.isLoading.collectAsState()
 
     // Horizontal pager state for swipeable pages
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 6 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 7 })
     
     // Mapping pages to ScreenType index
     val pageToScreen = listOf(
@@ -466,7 +527,8 @@ fun iPodScreenDisplay(
         ScreenType.PLAYLISTS,
         ScreenType.SEARCH,
         ScreenType.QUEUE,
-        ScreenType.NOW_PLAYING
+        ScreenType.NOW_PLAYING,
+        ScreenType.JAMMING
     )
 
     // Sync ViewModel screen modifications to Pager
@@ -551,7 +613,15 @@ fun iPodScreenDisplay(
         // 3. ACTUAL DISPLAY LAYOUT
         Column(modifier = Modifier.fillMaxSize()) {
             // A. TOP APPLE-STYLE STATUS BAR
-            iPodStatusBar(currentTrack)
+            iPodStatusBar(currentTrack, currentUser, onLogout)
+
+            // Hidden WebView at root to keep audio playing globally across screens
+            Box(modifier = Modifier.size(1.dp).alpha(0f)) {
+                YouTubeWebViewPlayer(
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // B. SCREEN INNER CONTENT (PAGER OR SUBVIEW)
             Box(
@@ -582,6 +652,11 @@ fun iPodScreenDisplay(
                             onAddTrackToPlaylist = onAddTrackToPlaylist,
                             onShowLyrics = onShowLyrics
                         )
+                        ScreenType.JAMMING -> JammingScreen(
+                            viewModel = viewModel,
+                            onAddTrackToPlaylist = onAddTrackToPlaylist,
+                            onShowLyrics = onShowLyrics
+                        )
                         else -> {}
                     }
                 }
@@ -608,7 +683,11 @@ fun iPodScreenDisplay(
 }
 
 @Composable
-fun iPodStatusBar(currentTrack: Track?) {
+fun iPodStatusBar(
+    currentTrack: Track?,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -616,21 +695,62 @@ fun iPodStatusBar(currentTrack: Track?) {
             .background(Color.Black.copy(alpha = 0.2f))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        val displayStr = if (currentTrack != null) {
-            "${currentTrack.title} • ${currentTrack.artist}"
-        } else {
-            "iPod Player"
-        }
         Text(
-            text = displayStr,
+            text = "Verse",
             color = Color.White.copy(alpha = 0.9f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
         )
+        
+        Spacer(modifier = Modifier.weight(1f))
+        
+        if (currentUser != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.clickable { onLogout() }
+            ) {
+                val photoUrl = currentUser.photoUrl
+                val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } 
+                    ?: currentUser.email 
+                    ?: "U"
+                
+                if (photoUrl != null) {
+                    coil.compose.AsyncImage(
+                        model = photoUrl,
+                        contentDescription = "Profile",
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(Color.DarkGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = name.first().uppercase(),
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                
+                Text(
+                    text = "Logout",
+                    color = iPodAccentBlue,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }
 
@@ -660,12 +780,6 @@ fun NowPlayingScreen(
         label = "CoverArtHeightAnimation"
     )
 
-    val coverSpacerHeight by animateDpAsState(
-        targetValue = if (isExpanded) 14.dp else 6.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "CoverSpacerHeightAnimation"
-    )
-
     val metaSpacerHeight by animateDpAsState(
         targetValue = if (isExpanded) 10.dp else 4.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -678,6 +792,21 @@ fun NowPlayingScreen(
     var inlineResults by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+    // Audio device state
+    val context = LocalContext.current
+    val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
+    var outputDeviceName by remember { mutableStateOf("Speaker") }
+    
+    LaunchedEffect(Unit) {
+        while(true) {
+            val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val activeDevice = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+                ?: devices.firstOrNull()
+            outputDeviceName = activeDevice?.productName?.toString() ?: "Speaker"
+            kotlinx.coroutines.delay(2000)
+        }
+    }
 
     // Debounced search when query changes
     LaunchedEffect(inlineQuery) {
@@ -829,35 +958,32 @@ fun NowPlayingScreen(
                 .weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Hidden WebView to keep audio playing
-            Box(modifier = Modifier.size(1.dp).alpha(0f)) {
-                YouTubeWebViewPlayer(
-                    viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
             // Cover Art box
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(coverArtHeight)
-                    .shadow(12.dp, RoundedCornerShape(12.dp), clip = false)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF111111)),
+                    .weight(1f) // Takes remaining space to not waste any vertical space
+                    .padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (currentTrack != null) {
-                    AsyncImage(
-                        model = currentTrack!!.thumbnailUrl,
-                        contentDescription = "Cover Art",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                Box(
+                    modifier = Modifier
+                        .aspectRatio(1f) // Ensures 1:1 perfect square
+                        .shadow(12.dp, RoundedCornerShape(12.dp), clip = false)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF111111)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (currentTrack != null) {
+                        AsyncImage(
+                            model = currentTrack!!.thumbnailUrl,
+                            contentDescription = "Cover Art",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
-
-            Spacer(modifier = Modifier.height(coverSpacerHeight))
 
             // SONG METADATA PANEL
             Column(
@@ -1039,7 +1165,7 @@ fun NowPlayingScreen(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "kilobyte's AirPods",
+                        text = outputDeviceName,
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
@@ -1066,6 +1192,250 @@ fun NowPlayingScreen(
                             modifier = Modifier.size(14.dp)
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// 1.5 JAMMING SCREEN
+// ==========================================
+@Composable
+fun JammingScreen(
+    viewModel: MusicPlayerViewModel,
+    onAddTrackToPlaylist: (Track) -> Unit,
+    onShowLyrics: () -> Unit
+) {
+    val context = LocalContext.current
+    var inRoom by remember { mutableStateOf(false) }
+    var roomCode by remember { mutableStateOf("") }
+    var showChat by remember { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf(false) }
+    var isHost by remember { mutableStateOf(false) }
+    
+    var myName by remember { mutableStateOf("User-${(100..999).random()}") }
+    
+    val currentTrack by viewModel.currentTrack.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val progressMs by viewModel.currentPositionMs.collectAsState()
+
+    val roomState by remember(inRoom, roomCode) {
+        if (inRoom && roomCode.isNotBlank()) com.example.data.remote.JammingService.listenToRoom(roomCode) else kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
+
+    val chatMessages by remember(inRoom, roomCode) {
+        if (inRoom && roomCode.isNotBlank()) com.example.data.remote.JammingService.listenToMessages(roomCode) else kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+
+    val coroutineScope = rememberCoroutineScope()
+
+    // Host: Sync immediately on track or playing state change
+    LaunchedEffect(isHost, currentTrack, isPlaying) {
+        if (isHost && inRoom && roomCode.isNotBlank()) {
+            com.example.data.remote.JammingService.updateRoomState(roomCode, currentTrack, isPlaying, viewModel.currentPositionMs.value)
+        }
+    }
+    
+    // Host: Sync position periodically
+    LaunchedEffect(isHost, inRoom, roomCode) {
+        if (isHost && inRoom && roomCode.isNotBlank()) {
+            while (true) {
+                com.example.data.remote.JammingService.updateRoomState(roomCode, currentTrack, isPlaying, viewModel.currentPositionMs.value)
+                kotlinx.coroutines.delay(10000)
+            }
+        }
+    }
+
+    // Guest: Sync from Firestore
+    LaunchedEffect(roomState) {
+        if (!isHost && inRoom && roomState != null) {
+            val state = roomState!!
+            if (state.currentTrackId.isNotBlank() && currentTrack?.id != state.currentTrackId) {
+                val track = com.example.data.model.Track(
+                    id = state.currentTrackId,
+                    title = state.currentTrackTitle,
+                    artist = state.currentTrackArtist,
+                    thumbnailUrl = state.currentTrackThumbnail,
+                    duration = state.currentTrackDuration,
+                    album = ""
+                )
+                viewModel.selectAndPlayTrack(track)
+            }
+            if (state.isPlaying != isPlaying) {
+                viewModel.setPlaying(state.isPlaying)
+            }
+            val elapsed = System.currentTimeMillis() - state.updatedAt
+            val expectedMs = if (state.isPlaying) state.positionMs + elapsed else state.positionMs
+            if (Math.abs(expectedMs - progressMs) > 3000) {
+                viewModel.seekTo(expectedMs)
+            }
+        }
+    }
+
+    if (!inRoom) {
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Text("Jamming Session", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(20.dp))
+            OutlinedTextField(
+                value = myName,
+                onValueChange = { myName = it },
+                label = { Text("Your Name", color = Color.Gray) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = roomCode,
+                onValueChange = { roomCode = it },
+                label = { Text("Room Code", color = Color.Gray) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = { 
+                val code = roomCode.trim()
+                val name = myName.trim()
+                if (code.isNotEmpty() && name.isNotEmpty()) {
+                    coroutineScope.launch {
+                        val success = com.example.data.remote.JammingService.joinRoom(code, name)
+                        if (success) {
+                            roomCode = code
+                            myName = name
+                            isHost = false
+                            inRoom = true
+                        } else {
+                            android.widget.Toast.makeText(context, "Failed to join room. Check code or connection.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }, colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue)) {
+                Text("Join Room")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = { 
+                val code = "ROOM-${(1000..9999).random()}"
+                val name = myName.trim()
+                if (name.isNotEmpty()) {
+                    coroutineScope.launch { 
+                        val success = com.example.data.remote.JammingService.createRoom(code, "host", name) 
+                        if (success) {
+                            roomCode = code
+                            myName = name
+                            isHost = true
+                            inRoom = true
+                        } else {
+                            android.widget.Toast.makeText(context, "Failed to create room.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
+                Text("Create Room")
+            }
+        }
+    } else {
+        if (showShareDialog) {
+            AlertDialog(
+                onDismissRequest = { showShareDialog = false },
+                title = { Text("Share Room", color = Color.White) },
+                text = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Text("Room Code: $roomCode", color = Color.White)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Box(modifier = Modifier.size(150.dp).background(Color.White), contentAlignment = Alignment.Center) {
+                            Text("QR Code\n(Placeholder)", color = Color.Black, textAlign = TextAlign.Center)
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = {
+                            val sendIntent = android.content.Intent().apply {
+                                action = android.content.Intent.ACTION_SEND
+                                putExtra(android.content.Intent.EXTRA_TEXT, "Join my jamming session! Room Code: $roomCode")
+                                type = "text/plain"
+                            }
+                            context.startActivity(android.content.Intent.createChooser(sendIntent, null))
+                        }) {
+                            Text("Share Link")
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showShareDialog = false }) {
+                        Text("Close")
+                    }
+                },
+                containerColor = Color.DarkGray
+            )
+        }
+
+        if (showChat) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Chat - Room: $roomCode", color = Color.White, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { showChat = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close Chat", tint = Color.White)
+                    }
+                }
+                if (roomState?.participants?.isNotEmpty() == true) {
+                    Text("Joined: ${roomState!!.participants.joinToString()}", color = iPodAccentBlue, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                }
+                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(chatMessages.size) { index ->
+                        val msg = chatMessages[index]
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Text("${msg.senderName}: ", color = iPodAccentBlue, fontWeight = FontWeight.Bold)
+                            Text(msg.message, color = Color.White)
+                        }
+                    }
+                }
+                var chatMsg by remember { mutableStateOf("") }
+                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = chatMsg,
+                        onValueChange = { chatMsg = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Type a message...", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                    )
+                    IconButton(onClick = {
+                        if (chatMsg.isNotBlank()) {
+                            coroutineScope.launch { com.example.data.remote.JammingService.sendMessage(roomCode, myName, chatMsg) }
+                            chatMsg = ""
+                        }
+                    }) {
+                        Icon(Icons.Default.Send, contentDescription = "Send", tint = iPodAccentBlue)
+                    }
+                }
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                NowPlayingScreen(
+                    viewModel = viewModel,
+                    onAddTrackToPlaylist = onAddTrackToPlaylist,
+                    onShowLyrics = onShowLyrics
+                )
+                
+                Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                    IconButton(onClick = { showShareDialog = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+                    }
+                    IconButton(onClick = { 
+                        coroutineScope.launch { com.example.data.remote.JammingService.leaveRoom(roomCode, myName) }
+                        inRoom = false 
+                    }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red)
+                    }
+                }
+                
+                FloatingActionButton(
+                    onClick = { showChat = true },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 48.dp).size(48.dp),
+                    containerColor = iPodAccentBlue
+                ) {
+                    Icon(Icons.Default.Chat, contentDescription = "Open Chat", tint = Color.White)
                 }
             }
         }
@@ -1331,54 +1701,127 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text(
-            text = "Liked Songs",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Liked Songs Cover
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Brush.linearGradient(listOf(Color(0xFF00C6FF), Color(0xFF0072FF))))
+                        .shadow(12.dp, RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Liked Songs",
+                        color = Color.White,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "${likedTracks.size} songs",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                
+                // Play Button
+                if (likedTracks.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(Color(0xFF00F2FE), Color(0xFF4FACFE))))
+                            .shadow(8.dp, CircleShape)
+                            .clickable { viewModel.selectAndPlayTrack(likedTracks.first(), likedTracks) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
+            }
+        }
 
         if (likedTracks.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         imageVector = Icons.Default.FavoriteBorder,
                         contentDescription = null,
                         tint = Color.Gray,
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text("No liked songs yet.", color = Color.Gray, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Songs you like will appear here", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Save songs by tapping the heart icon.", color = Color.Gray, fontSize = 12.sp)
                 }
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(likedTracks) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.White.copy(alpha = 0.05f)
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { viewModel.selectAndPlayTrack(track, likedTracks) }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text(
+                            text = "${index + 1}",
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White.copy(alpha = 0.5f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(28.dp)
+                        )
+
                         AsyncImage(
                             model = track.thumbnailUrl,
                             contentDescription = null,
@@ -1396,8 +1839,8 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         ) {
                             Text(
                                 text = track.title,
-                                color = Color.White,
-                                fontSize = 13.sp,
+                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1405,7 +1848,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                             Text(
                                 text = track.artist,
                                 color = Color.White.copy(0.6f),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1417,7 +1860,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Favorite,
-                                tint = iPodAccentBlue,
+                                tint = Color(0xFF1DB954), // Spotify Green heart
                                 contentDescription = "Liked",
                                 modifier = Modifier.size(16.dp)
                             )
@@ -1450,15 +1893,24 @@ fun PlaylistsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text(
-            text = "Playlists",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Text(
+                text = "Your Library",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
 
         LazyColumn(
             state = listState,
@@ -1471,82 +1923,115 @@ fun PlaylistsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else Color.White.copy(alpha = 0.03f)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.White.copy(alpha = 0.05f)
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { onCreatePlaylistClick() }
-                        .padding(12.dp),
+                        .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        tint = iPodAccentBlue,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(Color.White.copy(0.2f), Color.White.copy(0.05f)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Text(
                         text = "Create Playlist",
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
             // Playlist items (Index shifted by +1)
-            itemsIndexed(playlists) { index, playlist ->
-                val listIdx = index + 1
-                val isFocused = listIdx == focusedIndex
-
+            itemsIndexed(playlists) { i, playlist ->
+                val index = i + 1 // Offset by 1 for the Create Playlist item
+                val isFocused = index == focusedIndex
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else Color.White.copy(alpha = 0.03f)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.White.copy(alpha = 0.05f)
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { viewModel.selectPlaylist(playlist) }
-                        .padding(12.dp),
+                        .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.QueueMusic,
-                        contentDescription = null,
-                        tint = Color.White.copy(0.6f),
-                        modifier = Modifier.size(24.dp)
+                    // Generate a pseudo-random gradient for each playlist based on its ID
+                    val pid = playlist.id.toInt()
+                    val colors = listOf(
+                        Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4),
+                        Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    val color1 = colors[(pid * 3) % colors.size]
+                    val color2 = colors[(pid * 7 + 1) % colors.size]
+
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(color1, color2)))
+                            .shadow(4.dp, RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QueueMusic,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = playlist.name,
-                            color = Color.White,
-                            fontSize = 13.sp,
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Playlist • You",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp
                         )
                     }
                     IconButton(
                         onClick = { viewModel.deletePlaylist(playlist.id) },
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete Playlist",
-                            tint = Color.White.copy(alpha = 0.4f),
-                            modifier = Modifier.size(16.dp)
+                            tint = Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -1574,43 +2059,115 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        // Row header with back navigation
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+        // Unique Glassmorphic Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.1f))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
         ) {
-            IconButton(
-                onClick = { viewModel.setScreen(ScreenType.PLAYLISTS) },
-                modifier = Modifier.size(28.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = iPodAccentBlue
-                )
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                ) {
+                    IconButton(
+                        onClick = { viewModel.setScreen(ScreenType.PLAYLISTS) },
+                        modifier = Modifier.size(28.dp).background(Color.Black.copy(alpha=0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    }
+                }
+                
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Playlist Cover (Gradient based on ID, same as PlaylistsScreen)
+                    val pid = (playlist?.id ?: 0).toInt()
+                    val colors = listOf(
+                        Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4),
+                        Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688)
+                    )
+                    val color1 = colors[(pid * 3) % colors.size]
+                    val color2 = colors[(pid * 7 + 1) % colors.size]
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(color1, color2)))
+                            .shadow(12.dp, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QueueMusic,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = playlist?.name ?: "Playlist Detail",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Playlist • ${songs.size} songs",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    
+                    if (songs.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(Color(0xFF00F2FE), Color(0xFF4FACFE))))
+                                .shadow(8.dp, CircleShape)
+                                .clickable { viewModel.selectAndPlayTrack(songs.first(), songs) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = playlist?.name ?: "Playlist Detail",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
 
         if (songs.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Playlist is empty. Add songs!", color = Color.Gray, fontSize = 12.sp)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Playlist is empty. Add songs!", color = Color.Gray, fontSize = 14.sp)
             }
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(songs) { index, track ->
                     val isFocused = index == focusedIndex
@@ -1618,20 +2175,28 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.White.copy(alpha = 0.05f)
                             )
                             .border(
                                 width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp)
                             )
                             .clickable { viewModel.selectAndPlayTrack(track, songs) }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Text(
+                            text = "${index + 1}",
+                            color = if (isFocused) Color(0xFF00F2FE) else Color.White.copy(alpha = 0.5f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.width(28.dp)
+                        )
+                        
                         AsyncImage(
                             model = track.thumbnailUrl,
                             contentDescription = null,
@@ -1702,12 +2267,21 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             .fillMaxSize()
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
+        // Modern Search Header
+        Text(
+            text = "Search",
+            color = Color.White,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(bottom = 12.dp, top = 12.dp)
+        )
+
         // Material3 search text field with system keyboard triggers
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("Search YouTube...", color = Color.White.copy(0.4f), fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(0.6f)) },
+            placeholder = { Text("What do you want to listen to?", color = Color.White.copy(0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { viewModel.setSearchQuery("") }) {
@@ -1717,54 +2291,90 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                unfocusedContainerColor = Color.White.copy(alpha = 0.02f),
-                focusedBorderColor = iPodAccentBlue,
-                unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                focusedTextColor = Color.Black,
+                unfocusedTextColor = Color.Black,
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent
             ),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(52.dp)
                 .testTag("youtube_search_input")
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
         if (isSearching) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(30.dp))
             }
         } else if (results.isEmpty() && query.isNotBlank()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("No matching YouTube videos found.", color = Color.Gray, fontSize = 12.sp)
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No matching YouTube videos found.", color = Color.White, fontSize = 14.sp)
             }
         } else if (results.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Type above to search online music.", color = Color.Gray, fontSize = 12.sp)
+            // Browse All Section
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Browse All",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            val genres = listOf("Pop", "Hip-Hop", "Rock", "Electronic", "Classical", "Jazz", "Bollywood", "K-Pop")
+            val colors = listOf(Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4), Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688))
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(genres.size / 2) { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        for (col in 0..1) {
+                            val index = row * 2 + col
+                            if (index < genres.size) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(90.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(colors[index % colors.size])
+                                        .clickable { viewModel.setSearchQuery(genres[index]) }
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = genres[index],
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else {
+            Spacer(modifier = Modifier.height(16.dp))
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(results) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.15f)
-                                else Color.White.copy(alpha = 0.03f)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
-                                shape = RoundedCornerShape(10.dp)
+                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                else Color.Transparent
                             )
                             .clickable {
                                 focusManager.clearFocus()
@@ -1778,17 +2388,17 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(4.dp))
                         )
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title,
-                                color = Color.White,
-                                fontSize = 12.sp,
+                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1833,20 +2443,26 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .background(Color(0xFF121212))
     ) {
-        Text(
-            text = "Playback Queue",
-            color = Color.White,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 6.dp)
-        )
+        // Spotify-inspired Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 20.dp)
+        ) {
+            Text(
+                text = "Queue",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(queue) { index, track ->
                 val isFocused = index == focusedIndex
@@ -1855,18 +2471,10 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(
-                            if (isFocused) Color.White.copy(alpha = 0.15f)
-                            else if (isActivePlaying) iPodAccentBlue.copy(alpha = 0.08f)
-                            else Color.White.copy(alpha = 0.03f)
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) 
-                                    else if (isActivePlaying) iPodAccentBlue.copy(alpha = 0.3f) 
-                                    else Color.Transparent,
-                            shape = RoundedCornerShape(10.dp)
+                            if (isFocused) Color.White.copy(alpha = 0.2f)
+                            else Color.Transparent
                         )
                         .clickable { viewModel.selectAndPlayTrack(track) }
                         .padding(8.dp),
@@ -1877,17 +2485,17 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(4.dp))
                     )
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = track.title,
-                            color = if (isActivePlaying) iPodAccentBlue else Color.White,
-                            fontSize = 12.sp,
+                            color = if (isActivePlaying) Color(0xFF1DB954) else if (isFocused) iPodAccentBlue else Color.White,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1895,19 +2503,18 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                         Text(
                             text = track.artist,
                             color = Color.White.copy(0.6f),
-                            fontSize = 10.sp,
+                            fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     if (isActivePlaying) {
-                        Text(
-                            text = "Playing",
-                            color = iPodAccentBlue,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 6.dp)
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Playing",
+                            tint = Color(0xFF1DB954),
+                            modifier = Modifier.padding(end = 6.dp).size(20.dp)
                         )
                     }
 
@@ -1953,27 +2560,18 @@ fun _MiniPlayerDockOld(viewModel: MusicPlayerViewModel) {
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val currentScreen by viewModel.currentScreen.collectAsState()
-
         Box(
             modifier = Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color.Black)
         ) {
-            if (currentScreen != ScreenType.NOW_PLAYING) {
-                YouTubeWebViewPlayer(
-                    viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                AsyncImage(
-                    model = currentTrack?.thumbnailUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            AsyncImage(
+                model = currentTrack?.thumbnailUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
         Spacer(modifier = Modifier.width(10.dp))

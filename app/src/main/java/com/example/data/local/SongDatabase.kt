@@ -92,6 +92,26 @@ interface SongDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecentlyPlayed(song: RecentlyPlayed)
+
+    @Query("DELETE FROM liked_songs")
+    suspend fun clearLikedSongs()
+
+    @Query("DELETE FROM playlists")
+    suspend fun clearPlaylists()
+
+    @Query("DELETE FROM playlist_songs")
+    suspend fun clearPlaylistSongs()
+
+    @Query("DELETE FROM recently_played")
+    suspend fun clearRecentlyPlayed()
+
+    @Transaction
+    suspend fun clearAllData() {
+        clearLikedSongs()
+        clearPlaylists()
+        clearPlaylistSongs()
+        clearRecentlyPlayed()
+    }
 }
 
 @Database(

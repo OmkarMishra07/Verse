@@ -7,6 +7,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  id("com.google.firebase.crashlytics")
 }
 
 android {
@@ -86,6 +87,12 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
   implementation("com.google.firebase:firebase-analytics")
+  implementation("com.google.firebase:firebase-crashlytics")
+  implementation("com.google.firebase:firebase-auth")
+  implementation("com.google.firebase:firebase-firestore")
+  implementation("androidx.credentials:credentials:1.3.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
