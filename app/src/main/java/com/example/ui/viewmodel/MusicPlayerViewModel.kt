@@ -54,26 +54,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
     private var audioFocusRequest: AudioFocusRequest? = null
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        when (focusChange) {
-            AudioManager.AUDIOFOCUS_LOSS -> {
-                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS — pausing")
-                setPlaying(false)
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS_TRANSIENT — pausing")
-                setPlaying(false)
-            }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS_TRANSIENT_CAN_DUCK — ducking")
-                // YouTube IFrame manages its own volume; just pause to be safe
-                setPlaying(false)
-            }
-            AudioManager.AUDIOFOCUS_GAIN -> {
-                FirebaseCrashlytics.getInstance().log("AudioFocus: GAIN — resuming")
-                // Only auto-resume if we were playing before focus loss
-                setPlaying(true)
-            }
-        }
+        // No-op: Chromium WebView natively requests and manages audio focus. 
+        // When WebView loses focus (e.g. phone call), it pauses the video automatically,
+        // which triggers onPlayerStateChange(2) in PlayerBridge to update this ViewModel.
+        // Doing it manually here creates a race condition where Android strips focus from us
+        // when Chromium requests it, causing us to pause Chromium right as it starts!
     }
 
     private fun requestAudioFocus(): Boolean {
@@ -562,7 +547,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
 
             // Request audio focus before starting playback
-            requestAudioFocus()
+            // Removed: requestAudioFocus() because WebView handles it natively!
 
             _isLoading.value = false
             _currentPositionMs.value = 0L
