@@ -7,8 +7,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Required by WifiManager.createWifiLock() to keep streaming alive in background -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
     <application
+        android:name=".VerseApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -32,17 +36,19 @@
 
         <!--
             VerseMusicService is a MediaSessionService (from Media3).
+            - exported="true" is REQUIRED so the Android media system (lock screen,
+              system media controls, Bluetooth, Android Auto) can bind to the
+              MediaSession via the androidx.media3.session.MediaSessionService action.
+              Without this, notification controls only work within the app process.
             - foregroundServiceType="mediaPlayback" is required from Android 14+ (API 34)
               Without it, startForeground() crashes on new devices.
             - The androidx.media3.session.MediaSessionService intent-filter is required
               for Media3's MediaController and system media controls to discover this service.
-            - MusicPlaybackService (old) is kept in case anything still references it,
-              but VerseMusicService is the authoritative service going forward.
         -->
         <service
             android:name=".VerseMusicService"
             android:foregroundServiceType="mediaPlayback"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
@@ -57,3 +63,4 @@
     </application>
 
 </manifest>
+

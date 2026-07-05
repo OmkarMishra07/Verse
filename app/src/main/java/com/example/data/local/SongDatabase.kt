@@ -133,7 +133,7 @@ abstract class SongDatabase : RoomDatabase() {
                     SongDatabase::class.java,
                     "song_database"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance
                 instance

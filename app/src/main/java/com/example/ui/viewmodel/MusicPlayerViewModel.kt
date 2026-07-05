@@ -1,7 +1,12 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,10 +15,12 @@ import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.network.ITunesHelper
 import com.example.data.network.YouTubeSearchHelper
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ScreenType(val title: String) {
     EXPLORE("Explore"),
@@ -37,6 +44,70 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val songDao = database.songDao()
 
     var currentUserId: String? = null
+
+    // ── Rapid-tap guard: ensures only the newest play request executes ──────────
+    private var playResolveJob: kotlinx.coroutines.Job? = null
+
+    // ── Audio focus management ─────────────────────────────────────────────────
+    private val audioManager by lazy {
+        getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS — pausing")
+                setPlaying(false)
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS_TRANSIENT — pausing")
+                setPlaying(false)
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                FirebaseCrashlytics.getInstance().log("AudioFocus: LOSS_TRANSIENT_CAN_DUCK — ducking")
+                // YouTube IFrame manages its own volume; just pause to be safe
+                setPlaying(false)
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                FirebaseCrashlytics.getInstance().log("AudioFocus: GAIN — resuming")
+                // Only auto-resume if we were playing before focus loss
+                setPlaying(true)
+            }
+        }
+    }
+
+    private fun requestAudioFocus(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                .setAcceptsDelayedFocusGain(true)
+                .build()
+            audioFocusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(audioFocusChangeListener)
+        }
+    }
 
     // Screen State
     private val _isExpanded = MutableStateFlow(true)
@@ -213,6 +284,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private var lastSeekTime = 0L
+    private var lastTrackChangeTime = 0L
     private var lastSeekTargetMs = -1L
 
     fun seekTo(positionMs: Long) {
@@ -378,6 +450,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         fetchExploreContent()
 
+        // Set anonymous Crashlytics user ID for crash clustering
+        viewModelScope.launch {
+            currentUserId.let { uid ->
+                if (uid != null) {
+                    FirebaseCrashlytics.getInstance().setUserId(uid)
+                }
+            }
+        }
+
         // Handle live search debouncing
         viewModelScope.launch {
             _searchQuery
@@ -436,6 +517,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setScreen(screen: ScreenType) {
         _currentScreen.value = screen
         _focusedIndex.value = 0
+        FirebaseCrashlytics.getInstance().setCustomKey("current_screen", screen.name)
     }
 
     fun selectPlaylist(playlist: Playlist) {
@@ -448,35 +530,64 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         return songDao.isLiked(videoId)
     }
 
-    private suspend fun playResolvedTrack(track: Track) {
-        _isLoading.value = true
-        val resolved = if (track.id.startsWith("itunes_")) {
+    private fun playResolvedTrack(track: Track) {
+        playResolveJob?.cancel()
+        playResolveJob = viewModelScope.launch {
             try {
-                val query = "${track.title} ${track.artist} audio"
-                val results = YouTubeSearchHelper.search(query)
-                if (results.isNotEmpty()) {
-                    val yt = results.first()
-                    track.copy(id = yt.videoId, duration = yt.duration)
-                } else {
+                _isLoading.value = true
+            FirebaseCrashlytics.getInstance().log("playResolvedTrack: ${track.id} '${track.title.take(40)}'")
+            FirebaseCrashlytics.getInstance().setCustomKey("current_track_id", track.id)
+            FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "loading")
+
+            val resolved = if (track.id.startsWith("itunes_")) {
+                try {
+                    val query = "${track.title} ${track.artist} audio"
+                    val results = YouTubeSearchHelper.search(query)
+                    if (results.isNotEmpty()) {
+                        val yt = results.first()
+                        FirebaseCrashlytics.getInstance().log("iTunes->YT resolved: ${track.id} -> ${yt.videoId}")
+                        track.copy(id = yt.videoId, duration = yt.duration)
+                    } else {
+                        FirebaseCrashlytics.getInstance().log("iTunes->YT no results for '${query.take(50)}' — playing iTunes ID directly")
+                        track
+                    }
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerViewModel", "iTunes->YT resolution failed: ${e.message}", e)
+                    FirebaseCrashlytics.getInstance().setCustomKey("current_track_id", track.id)
+                    FirebaseCrashlytics.getInstance().recordException(e)
                     track
                 }
-            } catch (e: Exception) {
+            } else {
                 track
             }
-        } else {
-            track
+
+            // Request audio focus before starting playback
+            requestAudioFocus()
+
+            _isLoading.value = false
+            _currentPositionMs.value = 0L
+            _currentTrack.value = resolved
+            _isPlaying.value = true
+            lastTrackChangeTime = System.currentTimeMillis()
+            _playTrigger.value += 1
+            lastSeekTime = System.currentTimeMillis()
+            FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
+
+            try {
+                val recentlyPlayed = resolved.toRecentlyPlayed()
+                songDao.insertRecentlyPlayed(recentlyPlayed)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
+                }
+            } catch (e: Exception) {
+                Log.e("MusicPlayerViewModel", "Failed to record play history: ${e.message}", e)
+                FirebaseCrashlytics.getInstance().recordException(e)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Log.d("MusicPlayerViewModel", "playResolvedTrack cancelled for ${track.id}")
+        } finally {
+            _isLoading.value = false
         }
-        _isLoading.value = false
-        _currentPositionMs.value = 0L
-        _currentTrack.value = resolved
-        _isPlaying.value = true
-        _playTrigger.value += 1
-        lastSeekTime = System.currentTimeMillis()
-        
-        val recentlyPlayed = resolved.toRecentlyPlayed()
-        songDao.insertRecentlyPlayed(recentlyPlayed)
-        currentUserId?.let { uid ->
-            com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
         }
     }
 
@@ -510,7 +621,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     }
                 }
             } catch (e: Exception) {
-                Log.e("MusicPlayerViewModel", "Error generating related tracks: ${e.message}")
+                Log.e("MusicPlayerViewModel", "Error generating related tracks: ${e.message}", e)
+                FirebaseCrashlytics.getInstance().log("generateRelatedTracks failed query='${query.take(50)}'")
+                FirebaseCrashlytics.getInstance().recordException(e)
             }
         }
         return list
@@ -556,10 +669,14 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun togglePlayback() {
-        _isPlaying.value = !_isPlaying.value
+        setPlaying(!_isPlaying.value)
     }
 
     fun setPlaying(playing: Boolean) {
+        if (!playing && (System.currentTimeMillis() - lastTrackChangeTime < 1500L)) {
+            Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) right after track change")
+            return
+        }
         _isPlaying.value = playing
     }
 
@@ -604,7 +721,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun playNext(isAutoPlay: Boolean = false) {
         val q = _queue.value
         if (q.isEmpty()) return
-        
+        FirebaseCrashlytics.getInstance().log("playNext: isAutoPlay=$isAutoPlay repeatMode=${_repeatMode.value} queueSize=${q.size} idx=${_currentQueueIndex.value}")
+
         if (isAutoPlay && _repeatMode.value == RepeatMode.ONE) {
             _currentPositionMs.value = 0L
             seekTo(0L)
@@ -783,6 +901,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun onUserLoggedIn(uid: String) {
         if (currentUserId == uid) return
         currentUserId = uid
+        // Tag every crash with a stable anonymous ID for clustering by account
+        FirebaseCrashlytics.getInstance().setUserId(uid)
         viewModelScope.launch {
             // First time login on this device? We merge/pull from Firestore.
             val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
@@ -953,6 +1073,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     override fun onCleared() {
+        abandonAudioFocus()
         super.onCleared()
         if (instance == this) {
             instance = null

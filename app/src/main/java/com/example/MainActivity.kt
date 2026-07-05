@@ -649,26 +649,40 @@ fun iPodScreenDisplay(
                     userScrollEnabled = isExpanded,
                     beyondViewportPageCount = 6
                 ) { pageIndex ->
-                    when (pageToScreen[pageIndex]) {
-                        ScreenType.EXPLORE -> ExploreScreen(viewModel = viewModel)
-                        ScreenType.LIKED -> LikedScreen(viewModel = viewModel)
-                        ScreenType.PLAYLISTS -> PlaylistsScreen(
-                            viewModel = viewModel,
-                            onCreatePlaylistClick = showCreatePlaylistDialog
-                        )
-                        ScreenType.SEARCH -> SearchScreen(viewModel = viewModel)
-                        ScreenType.QUEUE -> QueueScreen(viewModel = viewModel)
-                        ScreenType.NOW_PLAYING -> NowPlayingScreen(
-                            viewModel = viewModel,
-                            onAddTrackToPlaylist = onAddTrackToPlaylist,
-                            onShowLyrics = onShowLyrics
-                        )
-                        ScreenType.JAMMING -> JammingScreen(
-                            viewModel = viewModel,
-                            onAddTrackToPlaylist = onAddTrackToPlaylist,
-                            onShowLyrics = onShowLyrics
-                        )
-                        else -> {}
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                val absOffset = kotlin.math.abs(pageOffset)
+                                val fraction = 1f - absOffset.coerceIn(0f, 1f)
+                                
+                                scaleX = 0.85f + (0.15f * fraction)
+                                scaleY = 0.85f + (0.15f * fraction)
+                                alpha = 0.3f + (0.7f * fraction)
+                            }
+                    ) {
+                        when (pageToScreen[pageIndex]) {
+                            ScreenType.EXPLORE -> ExploreScreen(viewModel = viewModel)
+                            ScreenType.LIKED -> LikedScreen(viewModel = viewModel)
+                            ScreenType.PLAYLISTS -> PlaylistsScreen(
+                                viewModel = viewModel,
+                                onCreatePlaylistClick = showCreatePlaylistDialog
+                            )
+                            ScreenType.SEARCH -> SearchScreen(viewModel = viewModel)
+                            ScreenType.QUEUE -> QueueScreen(viewModel = viewModel)
+                            ScreenType.NOW_PLAYING -> NowPlayingScreen(
+                                viewModel = viewModel,
+                                onAddTrackToPlaylist = onAddTrackToPlaylist,
+                                onShowLyrics = onShowLyrics
+                            )
+                            ScreenType.JAMMING -> JammingScreen(
+                                viewModel = viewModel,
+                                onAddTrackToPlaylist = onAddTrackToPlaylist,
+                                onShowLyrics = onShowLyrics
+                            )
+                            else -> {}
+                        }
                     }
                 }
 

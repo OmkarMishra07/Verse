@@ -1,6 +1,7 @@
 package com.example.data.network
 
 import android.util.Log
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -80,6 +81,8 @@ object ITunesHelper {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching from iTunes: ${e.message}", e)
+            FirebaseCrashlytics.getInstance().log("iTunesFetch failed url=${url.take(80)}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
         results
     }

@@ -8,6 +8,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.example.ui.viewmodel.MusicPlayerViewModel
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 
 /**
  * Singleton WebView that lives at the SERVICE level.
@@ -27,6 +28,8 @@ object WebViewHolder {
     private var webView: WebView? = null
     private var isInitialized = false
     private var hasLoadedFirstVideo = false
+    private var lastLoadedVideoId: String? = null
+    private var lastLoadTime: Long = 0L
 
     /**
      * Initialize the WebView inside the foreground service context.
@@ -59,9 +62,7 @@ object WebViewHolder {
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()
 
-            if (viewModel != null) {
-                addJavascriptInterface(PlayerBridge(viewModel), "AndroidPlayerBridge")
-            }
+            addJavascriptInterface(PlayerBridge(viewModel), "AndroidPlayerBridge")
         }
 
         Log.d("WebViewHolder", "WebView initialized inside service")
@@ -80,15 +81,8 @@ object WebViewHolder {
 
     /** Called by MusicPlayerViewModel when viewModel is ready (after service starts). */
     fun attachViewModel(viewModel: MusicPlayerViewModel) {
-        val wv = webView ?: return
-        // Re-add the JS bridge with the live ViewModel
-        wv.post {
-            try {
-                wv.addJavascriptInterface(PlayerBridge(viewModel), "AndroidPlayerBridge")
-            } catch (e: Exception) {
-                Log.e("WebViewHolder", "Failed to attach ViewModel: ${e.message}")
-            }
-        }
+        // No-op: JavascriptInterface is added once during initInService.
+        // Re-adding it causes "Unknown object: 1" errors in Chromium.
     }
 
     fun getWebView(): WebView? = webView
@@ -100,6 +94,15 @@ object WebViewHolder {
      */
     fun loadVideo(videoId: String, startSeconds: Int = 0, autoplay: Boolean = true) {
         val wv = webView ?: return
+
+        // Deduplicate rapid dual-calls from UI and Background Service
+        val now = System.currentTimeMillis()
+        if (videoId == lastLoadedVideoId && (now - lastLoadTime) < 2000L) {
+            Log.d("WebViewHolder", "Ignoring duplicate loadVideo for $videoId")
+            return
+        }
+        lastLoadedVideoId = videoId
+        lastLoadTime = now
 
         wv.post {
             if (!hasLoadedFirstVideo) {
@@ -231,30 +234,67 @@ object WebViewHolder {
 }
 
 /**
- * JS → Kotlin bridge for the WebView player.
+ * JS -> Kotlin bridge for the WebView player.
  */
 class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) {
     private val activeViewModel: MusicPlayerViewModel?
         get() = MusicPlayerViewModel.instance ?: fallbackViewModel
 
+    // YouTube IFrame API error codes
+    // 2: invalid parameter, 5: HTML5 error, 100: video not found,
+    // 101/150: video not embeddable (most common for copyright/region blocks)
+    private fun ytErrorDescription(code: Int) = when (code) {
+        2    -> "invalid_param"
+        5    -> "html5_error"
+        100  -> "video_not_found"
+        101, 150 -> "not_embeddable"
+        else -> "unknown_$code"
+    }
+
     @JavascriptInterface fun onPlayerReady() {
+        FirebaseCrashlytics.getInstance().log("YT player ready")
         activeViewModel?.setLoading(false)
     }
 
     @JavascriptInterface fun onStateChange(state: Int) {
         val vm = activeViewModel ?: return
+        val trackId = vm.currentTrack.value?.id ?: "none"
         when (state) {
-            1 -> { vm.setPlaying(true);  vm.setLoading(false) }
-            2 -> { vm.setPlaying(false); vm.setLoading(false) }
-            3 -> vm.setLoading(true)
+            1 -> {
+                FirebaseCrashlytics.getInstance().log("YT state: PLAYING track=$trackId")
+                FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
+                vm.setPlaying(true)
+                vm.setLoading(false)
+            }
+            2 -> {
+                FirebaseCrashlytics.getInstance().log("YT state: PAUSED track=$trackId")
+                FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "paused")
+                vm.setPlaying(false)
+                vm.setLoading(false)
+            }
+            3 -> {
+                FirebaseCrashlytics.getInstance().log("YT state: BUFFERING track=$trackId")
+                FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "buffering")
+                vm.setLoading(true)
+            }
             0 -> {
                 val pos = vm.currentPositionMs.value
                 val dur = vm.durationMs.value
-                // Only automatically advance if we are within 5 seconds of the end of the song
-                if (dur > 0 && Math.abs(dur - pos) <= 5000) {
+                // Guard against false-positive ENDED events fired during seek-to-start
+                // (where pos would be near 0 and dur is large).
+                // Tolerance is 30s to account for:
+                //   - 500ms polling lag in position updates
+                //   - Duration not yet updated from YouTube (still at default 180000ms)
+                //   - Variable song lengths where the last poll may lag behind
+                // We skip only if pos is very close to 0 (clearly a false-positive on seek).
+                val isNearStart = pos < 3000L
+                if (!isNearStart) {
+                    FirebaseCrashlytics.getInstance().log("YT state: ENDED track=$trackId pos=${pos}ms dur=${dur}ms -> advancing")
+                    FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "ended")
                     vm.playNext(isAutoPlay = true)
                 } else {
-                    Log.w("PlayerBridge", "Ignored false-positive ENDED event (position=$pos, duration=$dur)")
+                    Log.w("PlayerBridge", "Ignored false-positive ENDED event (position=$pos, duration=$dur) — pos near start")
+                    FirebaseCrashlytics.getInstance().log("YT state: false-positive ENDED suppressed pos=${pos}ms")
                     // Auto-resume if it was a false positive pause during seek
                     if (vm.isPlaying.value) {
                         vm.setPlaying(true)
@@ -263,17 +303,39 @@ class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) 
             }
         }
     }
-    @JavascriptInterface fun onTimeUpdate(timeStr: String)  {
+
+    @JavascriptInterface fun onTimeUpdate(timeStr: String) {
         val time = timeStr.toDoubleOrNull() ?: 0.0
         activeViewModel?.updateProgress((time * 1000).toLong())
     }
-    @JavascriptInterface fun onVideoDuration(dStr: String)  {
+
+    @JavascriptInterface fun onVideoDuration(dStr: String) {
         val d = dStr.toDoubleOrNull() ?: 0.0
         activeViewModel?.updateDuration((d * 1000).toLong())
     }
+
     @JavascriptInterface fun onVideoLoadedFraction(fractionStr: String) {
         val fraction = fractionStr.toFloatOrNull() ?: 0f
         activeViewModel?.updateBufferedFraction(fraction)
     }
-    @JavascriptInterface fun onPlayerError(error: Int) { activeViewModel?.setLoading(false) }
+
+    @JavascriptInterface fun onPlayerError(error: Int) {
+        val vm = activeViewModel
+        val trackId = vm?.currentTrack?.value?.id ?: "none"
+        val desc = ytErrorDescription(error)
+        Log.e("PlayerBridge", "YT player error $error ($desc) for track=$trackId")
+        FirebaseCrashlytics.getInstance().log("YT player error $error ($desc) track=$trackId")
+        FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "error")
+        FirebaseCrashlytics.getInstance().setCustomKey("current_track_id", trackId)
+        // Report as non-fatal so we see frequency in dashboard without crashing
+        FirebaseCrashlytics.getInstance().recordException(
+            RuntimeException("YouTubePlayerError: $desc (code=$error) track=$trackId")
+        )
+        vm?.setLoading(false)
+        // If video is not embeddable or not found, skip to next automatically
+        if (error == 100 || error == 101 || error == 150) {
+            FirebaseCrashlytics.getInstance().log("Auto-skipping unplayable track=$trackId")
+            vm?.playNext(isAutoPlay = true)
+        }
+    }
 }

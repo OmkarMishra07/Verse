@@ -1,6 +1,7 @@
 package com.example.data.network
 
 import android.util.Log
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -84,6 +85,8 @@ object YouTubeSearchHelper {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error searching YouTube: ${e.message}", e)
+            FirebaseCrashlytics.getInstance().log("YouTubeSearch failed for query='${query.take(50)}'")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
         
         // Return results, falling back to empty if failed

@@ -26,8 +26,11 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import com.example.ui.viewmodel.MusicPlayerViewModel
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * VerseMusicService — foreground MediaSessionService for background music playback.
@@ -104,7 +107,7 @@ class VerseMusicService : MediaSessionService() {
             Notification.Builder(this)
         }
         return builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Verse")
             .setContentText("Loading...")
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -114,6 +117,7 @@ class VerseMusicService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        FirebaseCrashlytics.getInstance().setCustomKey("service_lifecycle_state", "creating")
 
         // Step 1: Create channel BEFORE everything else
         createNotificationChannel()
@@ -125,6 +129,8 @@ class VerseMusicService : MediaSessionService() {
             .setChannelId(channelId)
             .setChannelName(R.string.app_name)  // "Verse"
             .build()
+        // Give Media3 our branded icon for the status bar
+        provider.setSmallIcon(R.drawable.ic_notification)
         setMediaNotificationProvider(provider)
 
         // Step 3: Satisfy Android's 5-second foreground rule with a placeholder.
@@ -169,6 +175,7 @@ class VerseMusicService : MediaSessionService() {
         // Step 7: Start observing ViewModel — each update calls invalidateState()
         // which triggers Media3 to refresh the notification with real track info
         observeViewModelState()
+        FirebaseCrashlytics.getInstance().setCustomKey("service_lifecycle_state", "running")
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -183,6 +190,24 @@ class VerseMusicService : MediaSessionService() {
             ACTION_STOP  -> { vm?.setPlaying(false); stopSelf() }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    /**
+     * Called when the user swipes away the app from Recents.
+     * Stop playback cleanly and let the service die so no zombie notification remains.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        FirebaseCrashlytics.getInstance().log("VerseMusicService: onTaskRemoved — stopping service")
+        FirebaseCrashlytics.getInstance().setCustomKey("service_lifecycle_state", "task_removed")
+        val vm = MusicPlayerViewModel.instance
+        vm?.setPlaying(false)
+        // Give the pause command a moment to propagate, then stop
+        serviceScope.launch {
+            delay(300)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun observeViewModelState() {
@@ -200,21 +225,88 @@ class VerseMusicService : MediaSessionService() {
             // Attach the ViewModel's JS bridge to the WebView now that VM is ready
             WebViewHolder.attachViewModel(vm)
 
-            var lastPlaying = false
-            combine(vm.currentTrack, vm.isPlaying, vm.currentPositionMs, vm.durationMs, vm.isLoading) {
-                track, playing, pos, dur, loading -> QuintState(track, playing, pos, dur, loading)
-            }.collect { (track, playing, pos, dur, loading) ->
-                // Push state into VerseWebViewPlayer so Media3 notification updates
-                versePlayer?.syncState(track, playing, pos, dur, loading)
+            // ── Notification-critical state: track, playing, loading ──────────
+            // Only update Media3 when these actually change (NOT on every position
+            // tick which fires every 500 ms). This prevents constant notification
+            // rebuilds that cause flicker and drain battery.
+            var lastPlayingForLock = false
+            combine(
+                vm.currentTrack,
+                vm.isPlaying,
+                vm.isLoading
+            ) { track, playing, loading -> Triple(track, playing, loading) }
+                .distinctUntilChanged()
+                .collect { (track, playing, loading) ->
+                    // Push state into VerseWebViewPlayer so Media3 notification updates
+                    val pos = vm.currentPositionMs.value
+                    val dur = vm.durationMs.value
+                    versePlayer?.syncState(track, playing, pos, dur, loading)
 
-                // Manage WakeLock and WifiLock
-                if (playing != lastPlaying) {
-                    lastPlaying = playing
-                    if (playing) {
-                        acquireLocks()
-                    } else {
-                        releaseLocks()
+                    // Manage WakeLock and WifiLock
+                    if (playing != lastPlayingForLock) {
+                        lastPlayingForLock = playing
+                        if (playing) acquireLocks() else releaseLocks()
                     }
+                }
+        }
+
+        // ── Seek detector (updates notification only on manual seek) ─────────
+        // To prevent notification flicker, we don't update Media3 on every 500ms tick.
+        // Instead, we watch for jumps > 1500ms which indicate a manual seek.
+        serviceScope.launch {
+            var attempts = 0
+            while (MusicPlayerViewModel.instance == null && attempts < 30) {
+                delay(200); attempts++
+            }
+            val vm = MusicPlayerViewModel.instance ?: return@launch
+
+            var lastPos = vm.currentPositionMs.value
+            vm.currentPositionMs.collect { pos ->
+                if (kotlin.math.abs(pos - lastPos) > 1500L) {
+                    val track = vm.currentTrack.value
+                    if (track != null) {
+                        versePlayer?.syncState(
+                            track, 
+                            vm.isPlaying.value, 
+                            pos, 
+                            vm.durationMs.value, 
+                            vm.isLoading.value
+                        )
+                    }
+                }
+                lastPos = pos
+            }
+        }
+
+        // ── Background autoplay driver ────────────────────────────────────────
+        // The Composable LaunchedEffect(track?.id, playTrigger) that calls
+        // WebViewHolder.loadVideo() only runs while the UI is visible.
+        // When the song ends and playNext() fires in the background, we need
+        // the service to drive WebViewHolder.loadVideo() so the next track
+        // actually starts playing.
+        serviceScope.launch {
+            // Wait until ViewModel is available (same guard as above)
+            var attempts = 0
+            while (MusicPlayerViewModel.instance == null && attempts < 30) {
+                delay(200); attempts++
+            }
+            val vm = MusicPlayerViewModel.instance ?: return@launch
+
+            var lastPlayTrigger = vm.playTrigger.value
+            var lastTrackId: String? = vm.currentTrack.value?.id
+
+            combine(vm.currentTrack, vm.playTrigger) { track, trigger ->
+                track to trigger
+            }.collect { (track, trigger) ->
+                val trackId = track?.id ?: return@collect
+                // Fire loadVideo only when a new play is requested (trigger changed
+                // OR the track itself changed), mirroring the Composable's LaunchedEffect.
+                if (trigger != lastPlayTrigger || trackId != lastTrackId) {
+                    lastPlayTrigger = trigger
+                    lastTrackId = trackId
+                    val startSecs = (vm.currentPositionMs.value / 1000).toInt()
+                    Log.d("VerseMusicService", "BG autoplay: loading video $trackId @ ${startSecs}s")
+                    WebViewHolder.loadVideo(trackId, startSecs, autoplay = true)
                 }
             }
         }
@@ -249,6 +341,7 @@ class VerseMusicService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        FirebaseCrashlytics.getInstance().setCustomKey("service_lifecycle_state", "destroyed")
         releaseLocks()
         if (isReceiverRegistered) {
             try {

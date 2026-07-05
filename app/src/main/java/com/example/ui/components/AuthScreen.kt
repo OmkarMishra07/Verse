@@ -49,6 +49,7 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.userProfileChangeRequest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -942,6 +943,7 @@ private fun performGoogleLogin(
             onLoadingChange(false)  // User dismissed — reset button
         } catch (e: Exception) {
             onLoadingChange(false)
+            if (e is CancellationException) throw e
             Toast.makeText(context, "Google Sign-In failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
         }
     }
