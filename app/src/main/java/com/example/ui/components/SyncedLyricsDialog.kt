@@ -24,6 +24,10 @@ import com.example.data.model.Track
 import com.example.data.network.LRCLibHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.blur
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 
 data class LyricLine(val timeMs: Long, val text: String)
 
@@ -121,7 +125,7 @@ fun SyncedLyricsDialog(
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .androidx.compose.ui.draw.blur(radius = 60.dp, edgeTreatment = androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
+                        .blur(radius = 60.dp, edgeTreatment = androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
                 )
             }
             // Dark Gradient Overlay for readability
@@ -173,10 +177,10 @@ fun SyncedLyricsDialog(
                             
                             // Animations for smooth transitions
                             val targetAlpha = if (isActive || isPlain) 1f else 0.4f
-                            val animatedAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = targetAlpha, label = "alpha")
+                            val animatedAlpha by animateFloatAsState(targetValue = targetAlpha, label = "alpha")
                             
                             val targetScale = if (isActive && !isPlain) 1.05f else 1f
-                            val animatedScale by androidx.compose.animation.core.animateFloatAsState(targetValue = targetScale, label = "scale")
+                            val animatedScale by animateFloatAsState(targetValue = targetScale, label = "scale")
                             
                             Box(
                                 modifier = Modifier
@@ -198,10 +202,10 @@ fun SyncedLyricsDialog(
                                     lineHeight = 36.sp,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .androidx.compose.ui.graphics.graphicsLayer {
+                                        .graphicsLayer {
                                             scaleX = animatedScale
                                             scaleY = animatedScale
-                                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) // Scale from left
+                                            transformOrigin = TransformOrigin(0f, 0.5f) // Scale from left
                                         }
                                 )
                             }
