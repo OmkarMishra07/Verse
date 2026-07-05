@@ -53,6 +53,11 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+
+}
+
+base {
+  archivesName.set("Verse")
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -133,4 +138,27 @@ dependencies {
   // Media3 for foreground MediaSessionService, notification, BT/headset/lock-screen
   implementation("androidx.media3:media3-session:1.4.1")
   implementation("androidx.media3:media3-common:1.4.1")
+}
+
+tasks.register<Copy>("copyDebugApk") {
+  from(layout.buildDirectory.dir("outputs/apk/debug"))
+  into(rootProject.file("apks"))
+  include("Verse-debug.apk")
+  rename { "Verse.apk" }
+}
+
+tasks.register<Copy>("copyReleaseApk") {
+  from(layout.buildDirectory.dir("outputs/apk/release"))
+  into(rootProject.file("apks"))
+  include("Verse-release.apk")
+  rename { "Verse.apk" }
+}
+
+afterEvaluate {
+  tasks.named("assembleDebug") {
+    finalizedBy("copyDebugApk")
+  }
+  tasks.named("assembleRelease") {
+    finalizedBy("copyReleaseApk")
+  }
 }

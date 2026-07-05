@@ -202,6 +202,9 @@ object WebViewHolder {
               if (window.AndroidPlayerBridge) {
                 AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
                 AndroidPlayerBridge.onVideoDuration(player.getDuration());
+                if (typeof player.getVideoLoadedFraction === 'function') {
+                  AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction());
+                }
               }
             }
           } catch (e) {
@@ -230,30 +233,44 @@ object WebViewHolder {
 /**
  * JS → Kotlin bridge for the WebView player.
  */
-class PlayerBridge(private val viewModel: MusicPlayerViewModel) {
-    @JavascriptInterface fun onPlayerReady()           = viewModel.setLoading(false)
+class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) {
+    private val activeViewModel: MusicPlayerViewModel?
+        get() = MusicPlayerViewModel.instance ?: fallbackViewModel
+
+    @JavascriptInterface fun onPlayerReady() {
+        activeViewModel?.setLoading(false)
+    }
+
     @JavascriptInterface fun onStateChange(state: Int) {
+        val vm = activeViewModel ?: return
         when (state) {
-            1 -> { viewModel.setPlaying(true);  viewModel.setLoading(false) }
-            2 -> { viewModel.setPlaying(false); viewModel.setLoading(false) }
-            3 -> viewModel.setLoading(true)
+            1 -> { vm.setPlaying(true);  vm.setLoading(false) }
+            2 -> { vm.setPlaying(false); vm.setLoading(false) }
+            3 -> vm.setLoading(true)
             0 -> {
-                val pos = viewModel.currentPositionMs.value
-                val dur = viewModel.durationMs.value
+                val pos = vm.currentPositionMs.value
+                val dur = vm.durationMs.value
                 // Only automatically advance if we are within 5 seconds of the end of the song
                 if (dur > 0 && Math.abs(dur - pos) <= 5000) {
-                    viewModel.playNext(isAutoPlay = true)
+                    vm.playNext(isAutoPlay = true)
                 } else {
                     Log.w("PlayerBridge", "Ignored false-positive ENDED event (position=$pos, duration=$dur)")
                     // Auto-resume if it was a false positive pause during seek
-                    if (viewModel.isPlaying.value) {
-                        viewModel.setPlaying(true)
+                    if (vm.isPlaying.value) {
+                        vm.setPlaying(true)
                     }
                 }
             }
         }
     }
-    @JavascriptInterface fun onTimeUpdate(time: Float)  = viewModel.updateProgress((time * 1000).toLong())
-    @JavascriptInterface fun onVideoDuration(d: Float)  = viewModel.updateDuration((d * 1000).toLong())
-    @JavascriptInterface fun onPlayerError(error: Int) { viewModel.setLoading(false) }
+    @JavascriptInterface fun onTimeUpdate(time: Double)  {
+        activeViewModel?.updateProgress((time * 1000).toLong())
+    }
+    @JavascriptInterface fun onVideoDuration(d: Double)  {
+        activeViewModel?.updateDuration((d * 1000).toLong())
+    }
+    @JavascriptInterface fun onVideoLoadedFraction(fraction: Double) {
+        activeViewModel?.updateBufferedFraction(fraction.toFloat())
+    }
+    @JavascriptInterface fun onPlayerError(error: Int) { activeViewModel?.setLoading(false) }
 }

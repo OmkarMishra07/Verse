@@ -22,6 +22,7 @@ import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.DefaultMediaNotificationProvider
 import com.example.ui.viewmodel.MusicPlayerViewModel
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -53,6 +54,9 @@ class VerseMusicService : MediaSessionService() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var locksAcquired = false
 
+    private val notificationId = 1001
+    private val channelId = "verse_playback_channel"
+
     companion object {
         const val ACTION_PLAY  = "com.example.verse.ACTION_PLAY"
         const val ACTION_PAUSE = "com.example.verse.ACTION_PAUSE"
@@ -71,17 +75,82 @@ class VerseMusicService : MediaSessionService() {
         }
     }
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Create our channel — use the SAME channelId that we pass to
+            // DefaultMediaNotificationProvider so Media3 and our placeholder
+            // both live in the same channel with no conflict.
+            val channel = NotificationChannel(
+                channelId,
+                "Verse Music",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Verse music playback controls"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildPlaceholderNotification(): Notification {
+        // Minimal placeholder — only shown for a fraction of a second until
+        // Media3's DefaultMediaNotificationProvider takes over.
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("Verse")
+            .setContentText("Loading...")
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize the WebView inside the service so it lives in service process,
-        // completely detached from Activity lifecycle.
+        // Step 1: Create channel BEFORE everything else
+        createNotificationChannel()
+
+        // Step 2: Tell Media3 to use OUR channel and notification ID.
+        // This MUST happen before the MediaSession is created.
+        val provider = DefaultMediaNotificationProvider.Builder(this)
+            .setNotificationId(notificationId)
+            .setChannelId(channelId)
+            .setChannelName(R.string.app_name)  // "Verse"
+            .build()
+        setMediaNotificationProvider(provider)
+
+        // Step 3: Satisfy Android's 5-second foreground rule with a placeholder.
+        // Media3 will replace this notification automatically once syncState()
+        // fires and the player transitions from STATE_IDLE → STATE_READY.
+        val placeholder = buildPlaceholderNotification()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    notificationId,
+                    placeholder,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(notificationId, placeholder)
+            }
+        } catch (e: Exception) {
+            Log.e("VerseMusicService", "startForeground failed: ${e.message}")
+        }
+
+        // Step 4: Initialize WebView and player
         val vm = MusicPlayerViewModel.instance
         WebViewHolder.initInService(this, vm)
-
         versePlayer = VerseWebViewPlayer()
 
-        // MediaSession — drives the system notification and all external controls
+        // Step 5: Build MediaSession — Media3 drives the notification from here
         val sessionIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java)
@@ -93,10 +162,12 @@ class VerseMusicService : MediaSessionService() {
             .setSessionActivity(sessionIntent)
             .build()
 
-        // Register noisy receiver to automatically pause when headphones are unplugged
+        // Step 6: Noisy receiver for headphone unplug
         registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
         isReceiverRegistered = true
 
+        // Step 7: Start observing ViewModel — each update calls invalidateState()
+        // which triggers Media3 to refresh the notification with real track info
         observeViewModelState()
     }
 
@@ -130,11 +201,11 @@ class VerseMusicService : MediaSessionService() {
             WebViewHolder.attachViewModel(vm)
 
             var lastPlaying = false
-            combine(vm.currentTrack, vm.isPlaying, vm.currentPositionMs, vm.durationMs) {
-                track, playing, pos, dur -> Quad(track, playing, pos, dur)
-            }.collect { (track, playing, pos, dur) ->
+            combine(vm.currentTrack, vm.isPlaying, vm.currentPositionMs, vm.durationMs, vm.isLoading) {
+                track, playing, pos, dur, loading -> QuintState(track, playing, pos, dur, loading)
+            }.collect { (track, playing, pos, dur, loading) ->
                 // Push state into VerseWebViewPlayer so Media3 notification updates
-                versePlayer?.syncState(track, playing, pos, dur)
+                versePlayer?.syncState(track, playing, pos, dur, loading)
 
                 // Manage WakeLock and WifiLock
                 if (playing != lastPlaying) {
@@ -149,7 +220,7 @@ class VerseMusicService : MediaSessionService() {
         }
     }
 
-    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+    private data class QuintState<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
     // ── Locks ────────────────────────────────────────────────────────────────
 
@@ -208,6 +279,7 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
 
     private var track: com.example.data.model.Track? = null
     private var isPlaying = false
+    private var isLoading = false
     private var positionMs = 0L
     private var durationMs = 0L
 
@@ -249,8 +321,14 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
                 ).build()
             )
             .setPlaylist(playlist)
-            .setCurrentMediaItemIndex(0)
-            .setPlaybackState(if (track == null) Player.STATE_IDLE else Player.STATE_READY)
+            .setCurrentMediaItemIndex(if (playlist.isEmpty()) C.INDEX_UNSET else 0)
+            .setPlaybackState(
+                when {
+                    track == null -> Player.STATE_IDLE
+                    isLoading     -> Player.STATE_BUFFERING
+                    else          -> Player.STATE_READY
+                }
+            )
             .setPlayWhenReady(isPlaying, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setContentPositionMs(positionMs)
             .build()
@@ -289,10 +367,12 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
         newTrack: com.example.data.model.Track?,
         newIsPlaying: Boolean,
         newPositionMs: Long,
-        newDurationMs: Long
+        newDurationMs: Long,
+        newIsLoading: Boolean = false
     ) {
         track       = newTrack
         isPlaying   = newIsPlaying
+        isLoading   = newIsLoading
         positionMs  = newPositionMs
         durationMs  = newDurationMs
         invalidateState()   // Tells Media3 to re-read getState() and refresh notification

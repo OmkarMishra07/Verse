@@ -29,9 +29,26 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -451,13 +468,7 @@ fun iPodDeviceFrame(
                         }
                     },
                     onPrevClick = {
-                        val now = System.currentTimeMillis()
-                        if (now - lastPrevClickTime < 450L) {
-                            viewModel.playPrevious()
-                        } else {
-                            viewModel.updateProgress(0L)
-                        }
-                        lastPrevClickTime = now
+                        viewModel.playPrevious()
                     },
                     onNextClick = { viewModel.playNext() },
                     onPlayPauseClick = { viewModel.togglePlayback() },
@@ -754,6 +765,184 @@ fun iPodStatusBar(
     }
 }
 
+@Composable
+fun SeekBar(
+    viewModel: MusicPlayerViewModel,
+    modifier: Modifier = Modifier
+) {
+    val progressMs by viewModel.currentPositionMs.collectAsState()
+    val durationMs by viewModel.durationMs.collectAsState()
+    val bufferedFraction by viewModel.bufferedFraction.collectAsState()
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableStateOf(0f) }
+
+    // Compute display fraction
+    val displayFraction = when {
+        isDragging -> dragFraction
+        durationMs > 0L -> (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        else -> 0f
+    }
+
+    // Smooth animation during playback; instant snap during drag
+    val animatedFraction by animateFloatAsState(
+        targetValue = displayFraction,
+        animationSpec = if (isDragging)
+            snap()
+        else
+            tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        label = "SeekBarAnimation"
+    )
+
+    // If buffer data not coming in, show full bar so thumb is never hidden
+    val safeBufFraction = if (bufferedFraction <= 0.01f) 1f else bufferedFraction
+
+    val focusRequester = remember { FocusRequester() }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .focusRequester(focusRequester)
+            .focusable()
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(
+                    current = progressMs.toFloat(),
+                    range = 0f..maxOf(1f, durationMs.toFloat()),
+                    steps = 0
+                )
+                stateDescription = "${formatMs(progressMs)} of ${formatMs(durationMs)}"
+                setProgress { targetValue ->
+                    val targetMs = targetValue.toLong().coerceIn(0L, durationMs)
+                    viewModel.seekTo(targetMs)
+                    true
+                }
+            }
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    val stepMs = if (keyEvent.isShiftPressed) 15000L else 5000L
+                    when (keyEvent.key) {
+                        Key.DirectionLeft -> {
+                            val t = (progressMs - stepMs).coerceAtLeast(0L)
+                            viewModel.seekTo(t); true
+                        }
+                        Key.DirectionRight -> {
+                            val t = (progressMs + stepMs).coerceAtMost(durationMs)
+                            viewModel.seekTo(t); true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+    ) {
+        val widthPx = constraints.maxWidth.toFloat()
+        val widthDp = with(LocalDensity.current) { constraints.maxWidth.toDp() }
+        val thumbSize = 14.dp
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                // Drag gesture — updates dragFraction live while finger moves
+                .pointerInput(durationMs, widthPx) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            dragFraction = (offset.x / widthPx).coerceIn(0f, 1f)
+                            focusRequester.requestFocus()
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            dragFraction = (change.position.x / widthPx).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
+                            isDragging = false
+                            viewModel.seekTo(seekMs)
+                        },
+                        onDragCancel = {
+                            val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
+                            isDragging = false
+                            viewModel.seekTo(seekMs)
+                        }
+                    )
+                }
+                // Tap gesture — only fires when finger doesn't move (not a drag)
+                .pointerInput(durationMs, widthPx) {
+                    detectTapGestures(
+                        onTap = { offset ->
+                            if (durationMs > 0 && widthPx > 0) {
+                                val fraction = (offset.x / widthPx).coerceIn(0f, 1f)
+                                val seekMs = (fraction * durationMs).toLong().coerceIn(0L, durationMs)
+                                viewModel.seekTo(seekMs)
+                                focusRequester.requestFocus()
+                            }
+                        }
+                    )
+                }
+        ) {
+            // Track background
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
+            ) {
+                // Buffered range
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(safeBufFraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(Color.White.copy(alpha = 0.25f), RoundedCornerShape(2.dp))
+                )
+                // Played progress
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedFraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(iPodAccentBlue, RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Thumb
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = ((widthDp - thumbSize) * animatedFraction.coerceIn(0f, 1f)).coerceAtLeast(0.dp))
+                    .size(thumbSize)
+                    .background(Color.White, CircleShape)
+            )
+
+            // Drag tooltip
+            if (isDragging && durationMs > 0) {
+                val tooltipMs = (dragFraction * durationMs).toLong()
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(
+                            x = ((widthDp - 44.dp) * dragFraction).coerceAtLeast(0.dp),
+                            y = (-26).dp
+                        )
+                        .background(Color.Black.copy(0.85f), RoundedCornerShape(4.dp))
+                        .border(0.5.dp, Color.White.copy(0.2f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = formatMs(tooltipMs),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+
+
 // ==========================================
 // 1. NOW PLAYING SCREEN (COMPACT & DETAILS)
 // ==========================================
@@ -771,8 +960,12 @@ fun NowPlayingScreen(
     val isExpanded by viewModel.isExpanded.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
 
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPositionMs by remember { mutableStateOf(0L) }
+    val displayPositionMs = if (isDragging) dragPositionMs else progressMs
+
     val coverArtHeight by animateDpAsState(
-        targetValue = if (isExpanded) 160.dp else 105.dp,
+        targetValue = if (isExpanded) 180.dp else 150.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -1061,6 +1254,19 @@ fun NowPlayingScreen(
                     Spacer(modifier = Modifier.weight(1f))
 
                     IconButton(
+                        onClick = { viewModel.toggleShuffle() },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        val isShuffle by viewModel.isShuffleEnabled.collectAsState()
+                        Icon(
+                            imageVector = Icons.Filled.Shuffle,
+                            contentDescription = "Shuffle",
+                            tint = if (isShuffle) iPodAccentBlue else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
                         onClick = { viewModel.toggleLikeTrack(currentTrack!!) },
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -1109,87 +1315,92 @@ fun NowPlayingScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
-                    .pointerInput(durationMs) {
-                        detectTapGestures { offset ->
-                            val width = size.width
-                            if (width > 0 && durationMs > 0) {
-                                val fraction = offset.x / width
-                                val newPosMs = (fraction * durationMs).toLong().coerceIn(0L, durationMs)
-                                viewModel.seekTo(newPosMs)
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.CenterStart
+            SeekBar(viewModel = viewModel)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
+                Text(formatMs(displayPositionMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                Text(formatMs(durationMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+            }
+
+            // Bottom Actions (Lyrics, Queue, Devices, Volume)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Lyrics
+                Text(
+                    text = "Lyrics",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onShowLyrics() }
+                )
+
+                // Queue
+                Text(
+                    text = "Queue",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        viewModel.setExpanded(true)
+                        viewModel.setScreen(ScreenType.QUEUE)
+                    }
+                )
+
+                // Devices
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { /* Could show output device details */ }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(progressValue)
-                            .fillMaxHeight()
-                            .background(Color.White, RoundedCornerShape(2.dp))
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(formatMs(progressMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-                Text("-" + formatMs(maxOf(0L, durationMs - progressMs)),
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-            }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Filled.Headphones,
                         contentDescription = null,
                         tint = iPodAccentBlue,
-                        modifier = Modifier.size(12.dp)
+                        modifier = Modifier.size(10.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = outputDeviceName,
-                        color = Color.White.copy(alpha = 0.7f),
+                        text = "Devices",
+                        color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    IconButton(onClick = onShowLyrics, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            imageVector = Icons.Filled.Comment,
-                            contentDescription = "Lyrics",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { viewModel.setExpanded(true); viewModel.setScreen(ScreenType.QUEUE) },
-                        modifier = Modifier.size(24.dp)
+                // Volume Bar
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VolumeDown,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    val vol by viewModel.volume.collectAsState()
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(3.dp)
+                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(1.dp))
+                            .pointerInput(Unit) {
+                                detectTapGestures { offset ->
+                                    val newVol = (offset.x / 36.dp.toPx()).coerceIn(0f, 1f)
+                                    viewModel.setVolume(newVol)
+                                }
+                            }
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.QueueMusic,
-                            contentDescription = "Queue",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(vol)
+                                .fillMaxHeight()
+                                .background(iPodAccentBlue, RoundedCornerShape(1.dp))
                         )
                     }
                 }

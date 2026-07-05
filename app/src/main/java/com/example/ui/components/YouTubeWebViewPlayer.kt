@@ -104,6 +104,9 @@ private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autopl
             if (window.AndroidPlayerBridge) {
                 AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
                 AndroidPlayerBridge.onVideoDuration(player.getDuration());
+                if (typeof player.getVideoLoadedFraction === 'function') {
+                    AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction());
+                }
             }
           }
         }, 500);

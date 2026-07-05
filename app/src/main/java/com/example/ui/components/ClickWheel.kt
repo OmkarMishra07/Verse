@@ -240,12 +240,21 @@ fun ClickWheel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = "PlayPause",
-                        tint = Color.White.copy(alpha = 0.8f),
-                        modifier = Modifier.size(24.dp)
-                    )
+                    val isLoading by viewModel.isLoading.collectAsState()
+                    if (isLoading) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = com.example.ui.theme.iPodAccentBlue,
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.5.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = "PlayPause",
+                            tint = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
         }

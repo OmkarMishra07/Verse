@@ -166,6 +166,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _durationMs = MutableStateFlow(180000L) // Default 3 mins
     val durationMs = _durationMs.asStateFlow()
 
+    private val _bufferedFraction = MutableStateFlow(0f)
+    val bufferedFraction = _bufferedFraction.asStateFlow()
+
     private val _seekRequestMs = MutableStateFlow<Long?>(null)
     val seekRequestMs = _seekRequestMs.asStateFlow()
 
@@ -180,21 +183,71 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun toggleShuffle() {
+        val currentTrackObj = _currentTrack.value ?: return
+        val currentList = _queue.value
+        if (currentList.isEmpty()) return
+
+        if (_isShuffleEnabled.value) {
+            // Turn off shuffle -> restore original queue
+            if (originalQueue.isNotEmpty()) {
+                val idx = originalQueue.indexOfFirst { it.id == currentTrackObj.id }
+                _queue.value = originalQueue
+                if (idx != -1) {
+                    _currentQueueIndex.value = idx
+                }
+            }
+            _isShuffleEnabled.value = false
+        } else {
+            // Turn on shuffle -> store current as original, and shuffle
+            originalQueue = currentList.toList()
+            val shuffled = currentList.toMutableList().apply {
+                remove(currentTrackObj)
+                shuffle()
+                add(0, currentTrackObj)
+            }
+            _queue.value = shuffled
+            _currentQueueIndex.value = 0
+            _isShuffleEnabled.value = true
+        }
+    }
+
     private var lastSeekTime = 0L
+    private var lastSeekTargetMs = -1L
 
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
         lastSeekTime = System.currentTimeMillis()
+        lastSeekTargetMs = positionMs
+
+        // Only show loading if we have real buffer data AND seek is beyond buffered range
+        val buf = _bufferedFraction.value
+        if (buf > 0.05f && _durationMs.value > 0L) {
+            val targetFraction = positionMs.toFloat() / _durationMs.value.toFloat()
+            if (targetFraction > buf) {
+                _isLoading.value = true
+            }
+        }
     }
+
 
     fun clearSeekRequest() {
         _seekRequestMs.value = null
     }
 
+    fun updateBufferedFraction(fraction: Float) {
+        _bufferedFraction.value = fraction.coerceIn(0f, 1f)
+    }
+
     // Playback Queue
     private val _queue = MutableStateFlow<List<Track>>(emptyList())
     val queue = _queue.asStateFlow()
+
+    private val _isShuffleEnabled = MutableStateFlow(false)
+    val isShuffleEnabled = _isShuffleEnabled.asStateFlow()
+
+    private var originalQueue: List<Track> = emptyList()
 
     private val _currentQueueIndex = MutableStateFlow(0)
     val currentQueueIndex = _currentQueueIndex.asStateFlow()
@@ -358,7 +411,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val intent = Intent(context, VerseMusicService::class.java)
                 if (track != null && playing) {
                     try {
-                        context.startService(intent)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            context.startForegroundService(intent)
+                        } else {
+                            context.startService(intent)
+                        }
                     } catch (e: Exception) {
                         Log.e("MusicPlayerViewModel", "Failed to start VerseMusicService: ${e.message}")
                     }
@@ -511,13 +568,36 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateProgress(positionMs: Long) {
-        if (System.currentTimeMillis() - lastSeekTime < 1000L) {
+        // After a seek, ignore position updates that are clearly wrong (far from seek target)
+        // for up to 3 seconds. Accept them once the player has landed near the target.
+        if (lastSeekTargetMs >= 0L) {
+            val diff = kotlin.math.abs(positionMs - lastSeekTargetMs)
+            val elapsed = System.currentTimeMillis() - lastSeekTime
+            when {
+                diff <= 2000L -> {
+                    // Player landed — clear seek lock and accept all updates normally
+                    lastSeekTargetMs = -1L
+                    lastSeekTime = 0L
+                    _isLoading.value = false
+                    _currentPositionMs.value = positionMs
+                }
+                elapsed >= 3000L -> {
+                    // Timeout — give up waiting, accept whatever position comes in
+                    lastSeekTargetMs = -1L
+                    lastSeekTime = 0L
+                    _isLoading.value = false
+                    _currentPositionMs.value = positionMs
+                }
+                // else: still within 3s window and not near target — skip this update
+            }
             return
         }
         _currentPositionMs.value = positionMs
     }
 
+
     fun updateDuration(durationMs: Long) {
+        if (durationMs <= 0) return
         _durationMs.value = durationMs
     }
 
@@ -585,7 +665,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         // If current song is > 3 seconds, restart it. Otherwise previous song.
         if (_currentPositionMs.value > 3000L) {
             _currentPositionMs.value = 0L
-            // Trigger a seek to 0 in UI player
+            seekTo(0L)
         } else {
             val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
             _currentQueueIndex.value = prevIdx
