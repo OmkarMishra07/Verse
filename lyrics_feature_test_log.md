@@ -7,6 +7,7 @@
    - Used `LaunchedEffect` to auto-scroll the `LazyColumn` to keep the currently active line centered.
    - Clickable lines to seek to the specified timestamp via `viewModel.seekTo(ms)`.
 4. **Integration**: Hooked up `SyncedLyricsDialog` inside `MainActivity.kt` where the old static lyrics dialog was, passing it the `currentPositionMs` from the `viewModel`.
+5. **Aesthetics (Apple Music / Spotify Style)**: Added a blurred album cover background, animated text scale (1f -> 1.05f), animated opacity fade out for inactive lines, large bold fonts, and seamless tap seeking without ripples.
 
 ## Test Status
 - [x] Application compiles successfully

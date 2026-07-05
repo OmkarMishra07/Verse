@@ -110,16 +110,31 @@ fun SyncedLyricsDialog(
 
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xEE000000)
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Blurred Album Art Background
+            if (track?.thumbnailUrl != null) {
+                coil.compose.AsyncImage(
+                    model = track.thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .androidx.compose.ui.draw.blur(radius = 60.dp, edgeTreatment = androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded)
+                )
+            }
+            // Dark Gradient Overlay for readability
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .padding(horizontal = 24.dp, vertical = 40.dp)
             ) {
                 // Header
                 Row(
@@ -127,13 +142,16 @@ fun SyncedLyricsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-                    IconButton(onClick = onDismissRequest) {
+                    Text("Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+                    IconButton(
+                        onClick = onDismissRequest,
+                        modifier = Modifier.background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(50))
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -141,37 +159,52 @@ fun SyncedLyricsDialog(
                     }
                 } else if (error != null) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(error!!, color = Color.Gray, fontSize = 18.sp, textAlign = TextAlign.Center)
+                        Text(error!!, color = Color.LightGray, fontSize = 18.sp, textAlign = TextAlign.Center)
                     }
                 } else {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 120.dp) // padding so last line can reach center
+                        contentPadding = PaddingValues(top = 40.dp, bottom = 200.dp) // padding so last line can reach center
                     ) {
                         itemsIndexed(lyricsData) { index, line ->
                             val isActive = index == activeIndex
                             val isPlain = line.timeMs == -1L
                             
-                            val textColor = if (isActive || isPlain) Color.White else Color.Gray
-                            val fontSize = if (isActive && !isPlain) 24.sp else 18.sp
-                            val fontWeight = if (isActive && !isPlain) FontWeight.Bold else FontWeight.Normal
+                            // Animations for smooth transitions
+                            val targetAlpha = if (isActive || isPlain) 1f else 0.4f
+                            val animatedAlpha by androidx.compose.animation.core.animateFloatAsState(targetValue = targetAlpha, label = "alpha")
                             
-                            Text(
-                                text = line.text.ifEmpty { " " }, // Preserve empty lines
-                                color = textColor,
-                                fontSize = fontSize,
-                                fontWeight = fontWeight,
-                                textAlign = TextAlign.Center,
+                            val targetScale = if (isActive && !isPlain) 1.05f else 1f
+                            val animatedScale by androidx.compose.animation.core.animateFloatAsState(targetValue = targetScale, label = "scale")
+                            
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp)
-                                    .clickable {
-                                        if (line.timeMs != -1L) {
-                                            onSeek(line.timeMs)
+                                    .clickable(
+                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        indication = null, // Disable ripple for cleaner look
+                                        onClick = {
+                                            if (!isPlain) onSeek(line.timeMs)
                                         }
-                                    }
-                            )
+                                    )
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                Text(
+                                    text = line.text.ifEmpty { " " }, // Preserve empty lines
+                                    color = Color.White.copy(alpha = animatedAlpha),
+                                    fontSize = if (isPlain) 20.sp else 28.sp,
+                                    fontWeight = if (isActive && !isPlain) FontWeight.ExtraBold else FontWeight.Bold,
+                                    lineHeight = 36.sp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .androidx.compose.ui.graphics.graphicsLayer {
+                                            scaleX = animatedScale
+                                            scaleY = animatedScale
+                                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) // Scale from left
+                                        }
+                                )
+                            }
                         }
                     }
                 }
