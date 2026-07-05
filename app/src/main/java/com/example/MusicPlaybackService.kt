@@ -168,6 +168,8 @@ class VerseMusicService : MediaSessionService() {
             .setSessionActivity(sessionIntent)
             .build()
 
+        addSession(mediaSession!!)
+
         // Step 6: Noisy receiver for headphone unplug
         registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
         isReceiverRegistered = true
@@ -233,14 +235,16 @@ class VerseMusicService : MediaSessionService() {
             combine(
                 vm.currentTrack,
                 vm.isPlaying,
-                vm.isLoading
-            ) { track, playing, loading -> Triple(track, playing, loading) }
+                vm.isLoading,
+                vm.durationMs
+            ) { track, playing, loading, duration -> 
+                QuintState(track, playing, loading, duration, Unit) 
+            }
                 .distinctUntilChanged()
-                .collect { (track, playing, loading) ->
+                .collect { (track, playing, loading, duration, _) ->
                     // Push state into VerseWebViewPlayer so Media3 notification updates
                     val pos = vm.currentPositionMs.value
-                    val dur = vm.durationMs.value
-                    versePlayer?.syncState(track, playing, pos, dur, loading)
+                    versePlayer?.syncState(track, playing, pos, duration, loading)
 
                     // Manage WakeLock and WifiLock
                     if (playing != lastPlayingForLock) {
