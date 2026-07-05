@@ -2422,6 +2422,8 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                             )
                         }
 
+                        IconButton(
+                            onClick = { playlist?.let { viewModel.removeTrackFromPlaylist(track, it.id) } },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
