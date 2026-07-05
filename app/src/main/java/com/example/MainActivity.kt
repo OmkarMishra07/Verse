@@ -2422,8 +2422,6 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                             )
                         }
 
-                        IconButton(
-                            onClick = { playlist?.let { viewModel.removeTrackFromPlaylist(track, it.id) } },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
@@ -2461,93 +2459,111 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Modern Search Header
+        // Modern Search Header (Apple Music inspired)
         Text(
             text = "Search",
             color = Color.White,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(bottom = 12.dp, top = 12.dp)
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 16.dp, top = 8.dp)
         )
 
-        // Material3 search text field with system keyboard triggers
+        // Glassmorphism Search Bar
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("What do you want to listen to?", color = Color.White.copy(0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
+            placeholder = { Text("Artists, songs, or podcasts", color = Color.White.copy(0.4f), fontSize = 16.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(0.7f)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White)
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White.copy(0.7f))
                     }
                 }
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.Black,
-                unfocusedTextColor = Color.Black,
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedContainerColor = Color.White.copy(alpha = 0.1f),
+                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                focusedBorderColor = iPodAccentBlue.copy(alpha = 0.5f),
+                unfocusedBorderColor = Color.Transparent,
+                cursorColor = iPodAccentBlue
             ),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(56.dp)
                 .testTag("youtube_search_input")
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         if (isSearching) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(30.dp))
+                CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(36.dp))
             }
         } else if (results.isEmpty() && query.isNotBlank()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No matching YouTube videos found.", color = Color.White, fontSize = 14.sp)
+                Text("No results found for \"$query\"", color = Color.Gray, fontSize = 16.sp)
             }
         } else if (results.isEmpty()) {
-            // Browse All Section
-            Spacer(modifier = Modifier.height(16.dp))
+            // Discover Section - Custom Aesthetic
             Text(
-                text = "Browse All",
+                text = "Discover",
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 12.dp)
+                modifier = Modifier.padding(bottom = 16.dp)
             )
             
-            val genres = listOf("Pop", "Hip-Hop", "Rock", "Electronic", "Classical", "Jazz", "Bollywood", "K-Pop")
-            val colors = listOf(Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4), Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688))
+            val genres = listOf(
+                "Trending" to listOf(Color(0xFFFF512F), Color(0xFFDD2476)),
+                "New Releases" to listOf(Color(0xFF4776E6), Color(0xFF8E54E9)),
+                "Chill" to listOf(Color(0xFF00B4DB), Color(0xFF0083B0)),
+                "Workout" to listOf(Color(0xFFF09819), Color(0xFFEDDE5D)),
+                "Focus" to listOf(Color(0xFF3CA55C), Color(0xFFB5AC49)),
+                "Party" to listOf(Color(0xFF833ab4), Color(0xFFfd1d1d))
+            )
             
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 items(genres.size / 2) { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                         for (col in 0..1) {
                             val index = row * 2 + col
                             if (index < genres.size) {
+                                val item = genres[index]
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(90.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors[index % colors.size])
-                                        .clickable { viewModel.setSearchQuery(genres[index]) }
-                                        .padding(12.dp)
+                                        .height(100.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.linearGradient(colors = item.second)
+                                        )
+                                        .clickable { viewModel.setSearchQuery(item.first) }
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.BottomStart
                                 ) {
                                     Text(
-                                        text = genres[index],
+                                        text = item.first,
                                         color = Color.White,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        style = androidx.compose.ui.text.TextStyle(
+                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                color = Color.Black.copy(alpha = 0.2f),
+                                                offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                                blurRadius = 4f
+                                            )
+                                        )
                                     )
                                 }
                             }
@@ -2556,20 +2572,21 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                 }
             }
         } else {
-            Spacer(modifier = Modifier.height(16.dp))
+            // Search Results layout
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 itemsIndexed(results) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                if (isFocused) Color.White.copy(alpha = 0.1f)
                                 else Color.Transparent
                             )
                             .clickable {
@@ -2584,11 +2601,11 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
                         )
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -2599,10 +2616,11 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = track.artist,
-                                color = Color.White.copy(0.6f),
-                                fontSize = 10.sp,
+                                color = Color.Gray,
+                                fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
