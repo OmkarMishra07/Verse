@@ -188,6 +188,7 @@ fun iPodPlayerApp(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val currentTrack by viewModel.currentTrack.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+    val currentPositionMs by viewModel.currentPositionMs.collectAsState()
 
     // Back navigation logic
     var backPressTime by remember { mutableLongStateOf(0L) }
@@ -301,41 +302,11 @@ fun iPodPlayerApp(
 
     // Dialogue Overlay: Lyrics Screen
     if (showLyricsDialog) {
-        val lyrics = remember(currentTrack) {
-            getLyricsForTrack(currentTrack)
-        }
-        AlertDialog(
+        com.example.ui.components.SyncedLyricsDialog(
+            track = currentTrack,
+            currentPositionMs = currentPositionMs,
             onDismissRequest = { showLyricsDialog = false },
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    IconButton(onClick = { showLyricsDialog = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 350.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = lyrics,
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 16.sp,
-                        lineHeight = 26.sp,
-                        fontFamily = FontFamily.SansSerif
-                    )
-                }
-            },
-            confirmButton = {},
-            containerColor = Color(0xFF151C26)
+            onSeek = { ms -> viewModel.seekTo(ms) }
         )
     }
 }
