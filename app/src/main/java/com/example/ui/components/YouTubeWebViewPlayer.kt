@@ -44,8 +44,8 @@ class YouTubePlayerBridge(
 ) {
     @JavascriptInterface fun onPlayerReady()            = onReady()
     @JavascriptInterface fun onStateChange(state: Int) = onStateChange.invoke(state)
-    @JavascriptInterface fun onTimeUpdate(time: Float) = onTimeUpdate.invoke(time)
-    @JavascriptInterface fun onVideoDuration(d: Float) = onDuration.invoke(d)
+    @JavascriptInterface fun onTimeUpdate(timeStr: String) = onTimeUpdate.invoke(timeStr.toFloatOrNull() ?: 0f)
+    @JavascriptInterface fun onVideoDuration(dStr: String) = onDuration.invoke(dStr.toFloatOrNull() ?: 0f)
     @JavascriptInterface fun onPlayerError(error: Int) = onError.invoke(error)
 }
 
@@ -102,10 +102,10 @@ private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autopl
         setInterval(function() {
           if (player && player.getCurrentTime && player.getPlayerState() == 1) {
             if (window.AndroidPlayerBridge) {
-                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
-                AndroidPlayerBridge.onVideoDuration(player.getDuration());
+                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime().toString());
+                AndroidPlayerBridge.onVideoDuration(player.getDuration().toString());
                 if (typeof player.getVideoLoadedFraction === 'function') {
-                    AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction());
+                    AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction().toString());
                 }
             }
           }

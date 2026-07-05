@@ -200,10 +200,10 @@ object WebViewHolder {
           try {
             if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {
               if (window.AndroidPlayerBridge) {
-                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
-                AndroidPlayerBridge.onVideoDuration(player.getDuration());
+                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime().toString());
+                AndroidPlayerBridge.onVideoDuration(player.getDuration().toString());
                 if (typeof player.getVideoLoadedFraction === 'function') {
-                  AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction());
+                  AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction().toString());
                 }
               }
             }
@@ -263,14 +263,17 @@ class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) 
             }
         }
     }
-    @JavascriptInterface fun onTimeUpdate(time: Double)  {
+    @JavascriptInterface fun onTimeUpdate(timeStr: String)  {
+        val time = timeStr.toDoubleOrNull() ?: 0.0
         activeViewModel?.updateProgress((time * 1000).toLong())
     }
-    @JavascriptInterface fun onVideoDuration(d: Double)  {
+    @JavascriptInterface fun onVideoDuration(dStr: String)  {
+        val d = dStr.toDoubleOrNull() ?: 0.0
         activeViewModel?.updateDuration((d * 1000).toLong())
     }
-    @JavascriptInterface fun onVideoLoadedFraction(fraction: Double) {
-        activeViewModel?.updateBufferedFraction(fraction.toFloat())
+    @JavascriptInterface fun onVideoLoadedFraction(fractionStr: String) {
+        val fraction = fractionStr.toFloatOrNull() ?: 0f
+        activeViewModel?.updateBufferedFraction(fraction)
     }
     @JavascriptInterface fun onPlayerError(error: Int) { activeViewModel?.setLoading(false) }
 }
