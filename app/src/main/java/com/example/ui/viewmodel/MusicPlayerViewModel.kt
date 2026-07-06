@@ -20,6 +20,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ScreenType(val title: String) {
@@ -129,6 +130,56 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _sectionDetailTracks = MutableStateFlow<List<Track>>(emptyList())
     val sectionDetailTracks = _sectionDetailTracks.asStateFlow()
+
+    // Jamming Session State
+    private val _jammingRoomId = MutableStateFlow("")
+    val jammingRoomId = _jammingRoomId.asStateFlow()
+
+    private val _jammingRoomState = MutableStateFlow<com.example.data.remote.JammingRoom?>(null)
+    val jammingRoomState = _jammingRoomState.asStateFlow()
+    
+    fun setJammingRoomId(roomId: String) {
+        _jammingRoomId.value = roomId
+    }
+
+    private var lastLocalActionTime = 0L
+
+    fun pushJammingState() {
+        val roomId = _jammingRoomId.value
+        val track = _currentTrack.value
+        if (roomId.isNotBlank() && track != null) {
+            lastLocalActionTime = System.currentTimeMillis()
+            viewModelScope.launch {
+                com.example.data.remote.JammingService.updateRoomState(
+                    roomId, track, _isPlaying.value, _currentPositionMs.value
+                )
+            }
+        }
+    }
+
+    private fun syncFromRemote(state: com.example.data.remote.JammingRoom) {
+        if (System.currentTimeMillis() - lastLocalActionTime < 2500L) return
+        
+        if (_isPlaying.value != state.playing) {
+            _isPlaying.value = state.playing
+        }
+        
+        val current = _currentTrack.value
+        var trackChanged = false
+        if (state.currentTrackId.isNotBlank() && (current == null || current.id != state.currentTrackId)) {
+            val track = Track(id = state.currentTrackId, title = state.currentTrackTitle, artist = state.currentTrackArtist, thumbnailUrl = state.currentTrackThumbnail, duration = state.currentTrackDuration, album = "")
+            _currentTrack.value = track
+            _playTrigger.value += 1
+            trackChanged = true
+        }
+        
+        val elapsed = System.currentTimeMillis() - state.updatedAt
+        val expectedMs = if (state.playing) state.positionMs + elapsed else state.positionMs
+        if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 3000) {
+            _currentPositionMs.value = expectedMs
+            _seekRequestMs.value = expectedMs
+        }
+    }
 
     fun openExploreSection(title: String, tracks: List<Track>) {
         _sectionDetailTitle.value = title
@@ -286,6 +337,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 _isLoading.value = true
             }
         }
+        pushJammingState()
     }
 
 
@@ -433,6 +485,21 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
+        viewModelScope.launch {
+            _jammingRoomId.collectLatest { roomId ->
+                if (roomId.isNotBlank()) {
+                    com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
+                        _jammingRoomState.value = room
+                        if (room != null) {
+                            syncFromRemote(room)
+                        }
+                    }
+                } else {
+                    _jammingRoomState.value = null
+                }
+            }
+        }
+
         fetchExploreContent()
 
         // Set anonymous Crashlytics user ID for crash clustering
@@ -557,6 +624,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _playTrigger.value += 1
             lastSeekTime = System.currentTimeMillis()
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
+            pushJammingState()
+            
+            val roomId = _jammingRoomId.value
+            if (roomId.isNotBlank()) {
+                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+                viewModelScope.launch {
+                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName changed the song to ${resolved.title}")
+                }
+            }
 
             try {
                 val recentlyPlayed = resolved.toRecentlyPlayed()
@@ -624,7 +700,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 // Start playing the track immediately with a single-item queue
                 _queue.value = listOf(track)
                 _currentQueueIndex.value = 0
-                setExpanded(false)
+                setScreen(ScreenType.NOW_PLAYING)
                 playResolvedTrack(track)
 
                 // Fetch related tracks in background and append to queue (non-blocking)
@@ -647,22 +723,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     _queue.value = updated
                     _currentQueueIndex.value = 0
                 }
-                setExpanded(false)
+                setScreen(ScreenType.NOW_PLAYING)
                 playResolvedTrack(track)
             }
         }
     }
 
     fun togglePlayback() {
-        setPlaying(!_isPlaying.value)
+        setPlaying(!_isPlaying.value, fromUser = true)
     }
 
-    fun setPlaying(playing: Boolean) {
+    fun setPlaying(playing: Boolean, fromUser: Boolean = false) {
         if (!playing && (System.currentTimeMillis() - lastTrackChangeTime < 1500L)) {
             Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) right after track change")
             return
         }
         _isPlaying.value = playing
+        if (fromUser) {
+            pushJammingState()
+        }
     }
 
     fun setLoading(loading: Boolean) {

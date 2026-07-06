@@ -196,6 +196,7 @@ fun YouTubeWebViewPlayer(
 fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying    by viewModel.isPlaying.collectAsState()
+    val jammingRoomId by viewModel.jammingRoomId.collectAsState()
 
     if (currentTrack == null) return
 
@@ -204,14 +205,20 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
             .fillMaxWidth()
             .height(64.dp)
             .background(Color(0xFF0D0D0D))
-            .clickable { viewModel.setExpanded(false) }
+            .clickable { 
+                if (jammingRoomId.isNotBlank()) {
+                    viewModel.setScreen(com.example.ui.viewmodel.ScreenType.JAMMING)
+                } else {
+                    viewModel.setScreen(com.example.ui.viewmodel.ScreenType.NOW_PLAYING)
+                }
+            }
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
+        coil.compose.AsyncImage(
             model              = currentTrack?.thumbnailUrl,
             contentDescription = null,
-            contentScale       = ContentScale.Crop,
+            contentScale       = androidx.compose.ui.layout.ContentScale.Crop,
             modifier           = Modifier
                 .size(44.dp)
                 .clip(RoundedCornerShape(6.dp))
@@ -224,19 +231,19 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
                 fontSize   = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis
+                overflow   = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Text(
-                text     = currentTrack?.artist ?: "",
-                color    = Color.White.copy(alpha = 0.55f),
+                text     = if (jammingRoomId.isNotBlank()) "Playing in room $jammingRoomId" else (currentTrack?.artist ?: ""),
+                color    = if (jammingRoomId.isNotBlank()) Color(0xFF33B5E5) else Color.White.copy(alpha = 0.55f),
                 fontSize = 10.sp,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
         }
         IconButton(onClick = { viewModel.togglePlayback() }) {
             Icon(
-                imageVector        = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                imageVector        = if (isPlaying) androidx.compose.material.icons.Icons.Default.Pause else androidx.compose.material.icons.Icons.Default.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
                 tint               = Color.White,
                 modifier           = Modifier.size(26.dp)
@@ -244,7 +251,7 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
         }
         IconButton(onClick = { viewModel.playNext() }) {
             Icon(
-                imageVector        = Icons.Default.SkipNext,
+                imageVector        = androidx.compose.material.icons.Icons.Default.SkipNext,
                 contentDescription = "Next",
                 tint               = Color.White.copy(alpha = 0.7f),
                 modifier           = Modifier.size(22.dp)
