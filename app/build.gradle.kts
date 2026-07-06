@@ -144,7 +144,6 @@ tasks.register<Copy>("copyDebugApk") {
   from(layout.buildDirectory.dir("outputs/apk/debug"))
   into(rootProject.file("apks"))
   include("Verse-debug.apk")
-  rename { "Verse.apk" }
 }
 
 tasks.register<Copy>("copyReleaseApk") {
