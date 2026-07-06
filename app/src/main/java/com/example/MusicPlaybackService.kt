@@ -214,15 +214,11 @@ class VerseMusicService : MediaSessionService() {
 
     private fun observeViewModelState() {
         serviceScope.launch {
-            // Wait until ViewModel is available
-            var attempts = 0
-            while (MusicPlayerViewModel.instance == null && attempts < 30) {
-                delay(200); attempts++
+            // Wait indefinitely until ViewModel is available
+            while (MusicPlayerViewModel.instance == null) {
+                delay(200)
             }
-            val vm = MusicPlayerViewModel.instance ?: run {
-                Log.e("VerseMusicService", "ViewModel unavailable — giving up")
-                return@launch
-            }
+            val vm = MusicPlayerViewModel.instance!!
 
             // Attach the ViewModel's JS bridge to the WebView now that VM is ready
             WebViewHolder.attachViewModel(vm)
@@ -258,11 +254,10 @@ class VerseMusicService : MediaSessionService() {
         // To prevent notification flicker, we don't update Media3 on every 500ms tick.
         // Instead, we watch for jumps > 1500ms which indicate a manual seek.
         serviceScope.launch {
-            var attempts = 0
-            while (MusicPlayerViewModel.instance == null && attempts < 30) {
-                delay(200); attempts++
+            while (MusicPlayerViewModel.instance == null) {
+                delay(200)
             }
-            val vm = MusicPlayerViewModel.instance ?: return@launch
+            val vm = MusicPlayerViewModel.instance!!
 
             var lastPos = vm.currentPositionMs.value
             vm.currentPositionMs.collect { pos ->
@@ -289,12 +284,11 @@ class VerseMusicService : MediaSessionService() {
         // the service to drive WebViewHolder.loadVideo() so the next track
         // actually starts playing.
         serviceScope.launch {
-            // Wait until ViewModel is available (same guard as above)
-            var attempts = 0
-            while (MusicPlayerViewModel.instance == null && attempts < 30) {
-                delay(200); attempts++
+            // Wait indefinitely until ViewModel is available
+            while (MusicPlayerViewModel.instance == null) {
+                delay(200)
             }
-            val vm = MusicPlayerViewModel.instance ?: return@launch
+            val vm = MusicPlayerViewModel.instance!!
 
             var lastPlayTrigger = vm.playTrigger.value
             var lastTrackId: String? = vm.currentTrack.value?.id
