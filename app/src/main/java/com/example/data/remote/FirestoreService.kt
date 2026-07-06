@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.util.Log
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.example.data.local.LikedSong
 import com.example.data.local.Playlist
 import com.example.data.local.PlaylistSong
@@ -59,6 +60,7 @@ object FirestoreService {
             userDoc(user.uid).set(data, SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "saveUserProfile failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -80,6 +82,7 @@ object FirestoreService {
             }
         } catch (e: Exception) {
             Log.e(TAG, "initUserProfile failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -102,6 +105,7 @@ object FirestoreService {
             likedSongsCol(userId).document(song.videoId).set(data).await()
         } catch (e: Exception) {
             Log.e(TAG, "upsertLikedSong failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -110,6 +114,7 @@ object FirestoreService {
             likedSongsCol(userId).document(videoId).delete().await()
         } catch (e: Exception) {
             Log.e(TAG, "deleteLikedSong failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -128,6 +133,7 @@ object FirestoreService {
             }
         } catch (e: Exception) {
             Log.e(TAG, "fetchLikedSongs failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
             emptyList()
         }
     }
@@ -152,6 +158,7 @@ object FirestoreService {
             pruneHistory(userId)
         } catch (e: Exception) {
             Log.e(TAG, "upsertHistory failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -166,6 +173,7 @@ object FirestoreService {
             }
         } catch (e: Exception) {
             Log.e(TAG, "pruneHistory failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -186,6 +194,7 @@ object FirestoreService {
                 }
         } catch (e: Exception) {
             Log.e(TAG, "fetchHistory failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
             emptyList()
         }
     }
@@ -208,6 +217,7 @@ object FirestoreService {
             playlistsCol(userId).document(playlist.id.toString()).set(data).await()
         } catch (e: Exception) {
             Log.e(TAG, "upsertPlaylist failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -219,6 +229,7 @@ object FirestoreService {
             playlistsCol(userId).document(playlistId.toString()).delete().await()
         } catch (e: Exception) {
             Log.e(TAG, "deletePlaylist failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -235,6 +246,7 @@ object FirestoreService {
             playlistSongsCol(userId, song.playlistId).document(song.videoId).set(data).await()
         } catch (e: Exception) {
             Log.e(TAG, "upsertPlaylistSong failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -243,6 +255,7 @@ object FirestoreService {
             playlistSongsCol(userId, playlistId).document(videoId).delete().await()
         } catch (e: Exception) {
             Log.e(TAG, "deletePlaylistSong failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
@@ -273,6 +286,7 @@ object FirestoreService {
             }
         } catch (e: Exception) {
             Log.e(TAG, "fetchPlaylists failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
             emptyList()
         }
     }

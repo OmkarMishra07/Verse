@@ -1,19 +1,26 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.MusicPlaybackService
+import com.example.VerseMusicService
 import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.network.ITunesHelper
 import com.example.data.network.YouTubeSearchHelper
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ScreenType(val title: String) {
     EXPLORE("Explore"),
@@ -37,6 +44,55 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val songDao = database.songDao()
 
     var currentUserId: String? = null
+
+    // ── Rapid-tap guard: ensures only the newest play request executes ──────────
+    private var playResolveJob: kotlinx.coroutines.Job? = null
+
+    // ── Audio focus management ─────────────────────────────────────────────────
+    private val audioManager by lazy {
+        getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        // No-op: Chromium WebView natively requests and manages audio focus. 
+        // When WebView loses focus (e.g. phone call), it pauses the video automatically,
+        // which triggers onPlayerStateChange(2) in PlayerBridge to update this ViewModel.
+        // Doing it manually here creates a race condition where Android strips focus from us
+        // when Chromium requests it, causing us to pause Chromium right as it starts!
+    }
+
+    private fun requestAudioFocus(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                .setAcceptsDelayedFocusGain(true)
+                .build()
+            audioFocusRequest = req
+            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.abandonAudioFocus(audioFocusChangeListener)
+        }
+    }
 
     // Screen State
     private val _isExpanded = MutableStateFlow(true)
@@ -152,16 +208,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     val currentTrack = _currentTrack.asStateFlow()
 
     private val _isPlaying = MutableStateFlow(false)
-    val isPlaying = _isPlaying.asStateFlow()
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
+
+    private val _playTrigger = MutableStateFlow(0)
+    val playTrigger: StateFlow<Int> = _playTrigger.asStateFlow()
 
     private val _currentPositionMs = MutableStateFlow(0L)
     val currentPositionMs = _currentPositionMs.asStateFlow()
 
     private val _durationMs = MutableStateFlow(180000L) // Default 3 mins
     val durationMs = _durationMs.asStateFlow()
+
+    private val _bufferedFraction = MutableStateFlow(0f)
+    val bufferedFraction = _bufferedFraction.asStateFlow()
 
     private val _seekRequestMs = MutableStateFlow<Long?>(null)
     val seekRequestMs = _seekRequestMs.asStateFlow()
@@ -177,18 +239,72 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun toggleShuffle() {
+        val currentTrackObj = _currentTrack.value ?: return
+        val currentList = _queue.value
+        if (currentList.isEmpty()) return
+
+        if (_isShuffleEnabled.value) {
+            // Turn off shuffle -> restore original queue
+            if (originalQueue.isNotEmpty()) {
+                val idx = originalQueue.indexOfFirst { it.id == currentTrackObj.id }
+                _queue.value = originalQueue
+                if (idx != -1) {
+                    _currentQueueIndex.value = idx
+                }
+            }
+            _isShuffleEnabled.value = false
+        } else {
+            // Turn on shuffle -> store current as original, and shuffle
+            originalQueue = currentList.toList()
+            val shuffled = currentList.toMutableList().apply {
+                remove(currentTrackObj)
+                shuffle()
+                add(0, currentTrackObj)
+            }
+            _queue.value = shuffled
+            _currentQueueIndex.value = 0
+            _isShuffleEnabled.value = true
+        }
+    }
+
+    private var lastSeekTime = 0L
+    private var lastTrackChangeTime = 0L
+    private var lastSeekTargetMs = -1L
+
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
+        lastSeekTime = System.currentTimeMillis()
+        lastSeekTargetMs = positionMs
+
+        // Only show loading if we have real buffer data AND seek is beyond buffered range
+        val buf = _bufferedFraction.value
+        if (buf > 0.05f && _durationMs.value > 0L) {
+            val targetFraction = positionMs.toFloat() / _durationMs.value.toFloat()
+            if (targetFraction > buf) {
+                _isLoading.value = true
+            }
+        }
     }
+
 
     fun clearSeekRequest() {
         _seekRequestMs.value = null
     }
 
+    fun updateBufferedFraction(fraction: Float) {
+        _bufferedFraction.value = fraction.coerceIn(0f, 1f)
+    }
+
     // Playback Queue
-    private val _queue = MutableStateFlow<List<Track>>(CuratedTracks.allCurated)
+    private val _queue = MutableStateFlow<List<Track>>(emptyList())
     val queue = _queue.asStateFlow()
+
+    private val _isShuffleEnabled = MutableStateFlow(false)
+    val isShuffleEnabled = _isShuffleEnabled.asStateFlow()
+
+    private var originalQueue: List<Track> = emptyList()
 
     private val _currentQueueIndex = MutableStateFlow(0)
     val currentQueueIndex = _currentQueueIndex.asStateFlow()
@@ -230,6 +346,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _volume = MutableStateFlow(0.7f) // 0.0f to 1.0f
     val volume = _volume.asStateFlow()
 
+    fun setVolume(vol: Float) {
+        _volume.value = vol.coerceIn(0f, 1f)
+    }
+
     private val _focusedIndex = MutableStateFlow(0)
     val focusedIndex = _focusedIndex.asStateFlow()
 
@@ -254,13 +374,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (savedPositionMs == 0L) {
             savedPositionMs = prefs.getLong("last_position_ms", 0L)
         }
+        if (savedQueue == null) {
+            val queueJson = prefs.getString("last_queue_json", null)
+            if (queueJson != null) {
+                savedQueue = deserializeTrackList(queueJson)
+            }
+        }
+        if (savedQueueIndex == 0) {
+            savedQueueIndex = prefs.getInt("last_queue_index", 0)
+        }
 
         // Restore state if saved, otherwise use defaults
-        _currentTrack.value = savedTrack ?: CuratedTracks.trending.first()
+        _currentTrack.value = savedTrack   // null if nothing was ever played
         _isPlaying.value = savedIsPlaying
         _currentPositionMs.value = savedPositionMs
         _durationMs.value = savedDurationMs
-        _queue.value = savedQueue ?: CuratedTracks.allCurated
+        _queue.value = savedQueue ?: emptyList()
         _currentQueueIndex.value = savedQueueIndex
 
         // Persist state updates to companion object and SharedPreferences
@@ -292,13 +421,28 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             durationMs.collect { savedDurationMs = it }
         }
         viewModelScope.launch {
-            queue.collect { savedQueue = it }
+            queue.collect { q ->
+                savedQueue = q
+                prefs.edit().putString("last_queue_json", serializeTrackList(q)).apply()
+            }
         }
         viewModelScope.launch {
-            currentQueueIndex.collect { savedQueueIndex = it }
+            currentQueueIndex.collect { idx ->
+                savedQueueIndex = idx
+                prefs.edit().putInt("last_queue_index", idx).apply()
+            }
         }
 
         fetchExploreContent()
+
+        // Set anonymous Crashlytics user ID for crash clustering
+        viewModelScope.launch {
+            currentUserId.let { uid ->
+                if (uid != null) {
+                    FirebaseCrashlytics.getInstance().setUserId(uid)
+                }
+            }
+        }
 
         // Handle live search debouncing
         viewModelScope.launch {
@@ -311,6 +455,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     try {
                         val results = YouTubeSearchHelper.search(query)
                         _searchResults.value = results.map { it.toTrack() }
+                        _focusedIndex.value = 0
                     } catch (e: Exception) {
                         Log.e("MusicPlayerViewModel", "Search failure: ${e.message}")
                     } finally {
@@ -319,15 +464,18 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 }
         }
 
-        // Start / Stop the Foreground Service based on track and playing state
+        // Start VerseMusicService (MediaSessionService) when playback is active.
+        // We call startService(intent) rather than startForegroundService to prevent
+        // ForegroundServiceDidNotStartInTimeException if there is a delay (e.g. buffering).
+        // Once playback actually starts, Media3's MediaSessionService will automatically
+        // promote itself to the foreground and show the notification.
         viewModelScope.launch {
             combine(currentTrack, isPlaying) { track, playing ->
                 track to playing
             }.collect { (track, playing) ->
                 val context = getApplication<Application>()
-                val intent = Intent(context, MusicPlaybackService::class.java)
-                if (track != null) {
-                    intent.action = MusicPlaybackService.ACTION_UPDATE
+                val intent = Intent(context, VerseMusicService::class.java)
+                if (track != null && playing) {
                     try {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                             context.startForegroundService(intent)
@@ -335,14 +483,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                             context.startService(intent)
                         }
                     } catch (e: Exception) {
-                        Log.e("MusicPlayerViewModel", "Failed to start service: ${e.message}")
-                    }
-                } else {
-                    intent.action = MusicPlaybackService.ACTION_STOP
-                    try {
-                        context.stopService(intent)
-                    } catch (e: Exception) {
-                        Log.e("MusicPlayerViewModel", "Failed to stop service: ${e.message}")
+                        Log.e("MusicPlayerViewModel", "Failed to start VerseMusicService: ${e.message}")
                     }
                 }
             }
@@ -361,6 +502,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setScreen(screen: ScreenType) {
         _currentScreen.value = screen
         _focusedIndex.value = 0
+        FirebaseCrashlytics.getInstance().setCustomKey("current_screen", screen.name)
     }
 
     fun selectPlaylist(playlist: Playlist) {
@@ -373,62 +515,153 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         return songDao.isLiked(videoId)
     }
 
-    private suspend fun playResolvedTrack(track: Track) {
-        _isLoading.value = true
-        val resolved = if (track.id.startsWith("itunes_")) {
+    private fun playResolvedTrack(track: Track) {
+        playResolveJob?.cancel()
+        playResolveJob = viewModelScope.launch {
             try {
-                val query = "${track.title} ${track.artist} audio"
-                val results = YouTubeSearchHelper.search(query)
-                if (results.isNotEmpty()) {
-                    val yt = results.first()
-                    track.copy(id = yt.videoId, duration = yt.duration)
-                } else {
+                _isLoading.value = true
+            FirebaseCrashlytics.getInstance().log("playResolvedTrack: ${track.id} '${track.title.take(40)}'")
+            FirebaseCrashlytics.getInstance().setCustomKey("current_track_id", track.id)
+            FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "loading")
+
+            val resolved = if (track.id.startsWith("itunes_")) {
+                try {
+                    val query = "${track.title} ${track.artist} audio"
+                    val results = YouTubeSearchHelper.search(query)
+                    if (results.isNotEmpty()) {
+                        val yt = results.first()
+                        FirebaseCrashlytics.getInstance().log("iTunes->YT resolved: ${track.id} -> ${yt.videoId}")
+                        track.copy(id = yt.videoId, duration = yt.duration)
+                    } else {
+                        FirebaseCrashlytics.getInstance().log("iTunes->YT no results for '${query.take(50)}' — playing iTunes ID directly")
+                        track
+                    }
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerViewModel", "iTunes->YT resolution failed: ${e.message}", e)
+                    FirebaseCrashlytics.getInstance().setCustomKey("current_track_id", track.id)
+                    FirebaseCrashlytics.getInstance().recordException(e)
                     track
                 }
-            } catch (e: Exception) {
+            } else {
                 track
             }
-        } else {
-            track
+
+            // Request audio focus before starting playback
+            // Removed: requestAudioFocus() because WebView handles it natively!
+
+            _isLoading.value = false
+            _currentPositionMs.value = 0L
+            _currentTrack.value = resolved
+            _isPlaying.value = true
+            lastTrackChangeTime = System.currentTimeMillis()
+            _playTrigger.value += 1
+            lastSeekTime = System.currentTimeMillis()
+            FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
+
+            try {
+                val recentlyPlayed = resolved.toRecentlyPlayed()
+                songDao.insertRecentlyPlayed(recentlyPlayed)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
+                }
+            } catch (e: Exception) {
+                Log.e("MusicPlayerViewModel", "Failed to record play history: ${e.message}", e)
+                FirebaseCrashlytics.getInstance().recordException(e)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Log.d("MusicPlayerViewModel", "playResolvedTrack cancelled for ${track.id}")
+        } finally {
+            _isLoading.value = false
         }
-        _isLoading.value = false
-        _currentPositionMs.value = 0L
-        _currentTrack.value = resolved
-        _isPlaying.value = true
-        
-        val recentlyPlayed = resolved.toRecentlyPlayed()
-        songDao.insertRecentlyPlayed(recentlyPlayed)
-        currentUserId?.let { uid ->
-            com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
         }
+    }
+
+    private suspend fun generateRelatedTracks(track: Track): List<Track> {
+        val existingIds = _queue.value.map { it.id }.toSet()
+        val list = mutableListOf<Track>()
+
+        // Strategy: use multiple query approaches like YouTube does for radio/mix
+        val queries = listOf(
+            "${track.artist} best songs",          // More songs from same artist
+            "${track.title} ${track.artist}",       // Exact match variants
+            "${track.artist} top hits"              // Top hits from artist
+        )
+
+        for (query in queries) {
+            if (list.size >= 10) break
+            try {
+                val results = YouTubeSearchHelper.search(query)
+                results.forEach { yt ->
+                    if (yt.videoId != track.id && yt.videoId !in existingIds && list.none { it.id == yt.videoId }) {
+                        list.add(
+                            Track(
+                                id = yt.videoId,
+                                title = yt.title,
+                                artist = yt.artist,
+                                album = "YouTube Radio",
+                                thumbnailUrl = yt.thumbnailUrl,
+                                duration = yt.duration
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MusicPlayerViewModel", "Error generating related tracks: ${e.message}", e)
+                FirebaseCrashlytics.getInstance().log("generateRelatedTracks failed query='${query.take(50)}'")
+                FirebaseCrashlytics.getInstance().recordException(e)
+            }
+        }
+        return list
     }
 
     // Playback controls
     fun selectAndPlayTrack(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
-            // Re-order or set queue
-            val idx = newQueue.indexOfFirst { it.id == track.id }
-            if (idx != -1) {
-                _queue.value = newQueue
-                _currentQueueIndex.value = idx
-            } else {
-                val updated = listOf(track) + newQueue.filter { it.id != track.id }
-                _queue.value = updated
-                _currentQueueIndex.value = 0
-            }
+            // Check if this is a single song selection (e.g. from Search or history)
+            val isSingleSong = newQueue.size <= 1 || !newQueue.any { it.id == track.id }
 
-            // Go to the Now Playing screen.
-            setScreen(ScreenType.NOW_PLAYING)
-            
-            playResolvedTrack(track)
+            if (isSingleSong) {
+                // Start playing the track immediately with a single-item queue
+                _queue.value = listOf(track)
+                _currentQueueIndex.value = 0
+                setExpanded(false)
+                playResolvedTrack(track)
+
+                // Fetch related tracks in background and append to queue (non-blocking)
+                launch {
+                    val related = generateRelatedTracks(track)
+                    // Append to queue after current track
+                    val currentQueue = _queue.value.toMutableList()
+                    related.forEach { r ->
+                        if (currentQueue.none { it.id == r.id }) currentQueue.add(r)
+                    }
+                    _queue.value = currentQueue
+                }
+            } else {
+                val idx = newQueue.indexOfFirst { it.id == track.id }
+                if (idx != -1) {
+                    _queue.value = newQueue
+                    _currentQueueIndex.value = idx
+                } else {
+                    val updated = listOf(track) + newQueue.filter { it.id != track.id }
+                    _queue.value = updated
+                    _currentQueueIndex.value = 0
+                }
+                setExpanded(false)
+                playResolvedTrack(track)
+            }
         }
     }
 
     fun togglePlayback() {
-        _isPlaying.value = !_isPlaying.value
+        setPlaying(!_isPlaying.value)
     }
 
     fun setPlaying(playing: Boolean) {
+        if (!playing && (System.currentTimeMillis() - lastTrackChangeTime < 1500L)) {
+            Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) right after track change")
+            return
+        }
         _isPlaying.value = playing
     }
 
@@ -437,17 +670,44 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateProgress(positionMs: Long) {
+        // After a seek, ignore position updates that are clearly wrong (far from seek target)
+        // for up to 3 seconds. Accept them once the player has landed near the target.
+        if (lastSeekTargetMs >= 0L) {
+            val diff = kotlin.math.abs(positionMs - lastSeekTargetMs)
+            val elapsed = System.currentTimeMillis() - lastSeekTime
+            when {
+                diff <= 2000L -> {
+                    // Player landed — clear seek lock and accept all updates normally
+                    lastSeekTargetMs = -1L
+                    lastSeekTime = 0L
+                    _isLoading.value = false
+                    _currentPositionMs.value = positionMs
+                }
+                elapsed >= 3000L -> {
+                    // Timeout — give up waiting, accept whatever position comes in
+                    lastSeekTargetMs = -1L
+                    lastSeekTime = 0L
+                    _isLoading.value = false
+                    _currentPositionMs.value = positionMs
+                }
+                // else: still within 3s window and not near target — skip this update
+            }
+            return
+        }
         _currentPositionMs.value = positionMs
     }
 
+
     fun updateDuration(durationMs: Long) {
+        if (durationMs <= 0) return
         _durationMs.value = durationMs
     }
 
     fun playNext(isAutoPlay: Boolean = false) {
         val q = _queue.value
         if (q.isEmpty()) return
-        
+        FirebaseCrashlytics.getInstance().log("playNext: isAutoPlay=$isAutoPlay repeatMode=${_repeatMode.value} queueSize=${q.size} idx=${_currentQueueIndex.value}")
+
         if (isAutoPlay && _repeatMode.value == RepeatMode.ONE) {
             _currentPositionMs.value = 0L
             seekTo(0L)
@@ -456,11 +716,41 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val nextIdx = _currentQueueIndex.value + 1
-        if (nextIdx >= q.size && isAutoPlay && _repeatMode.value == RepeatMode.OFF) {
-            _isPlaying.value = false
-            _currentPositionMs.value = 0L
-            seekTo(0L)
-            return
+        if (nextIdx >= q.size) {
+            if (_repeatMode.value == RepeatMode.OFF) {
+                // Fetch related songs and append them dynamically!
+                viewModelScope.launch {
+                    _isLoading.value = true
+                    val lastTrack = q.lastOrNull() ?: currentTrack.value
+                    if (lastTrack != null) {
+                        val related = generateRelatedTracks(lastTrack).filter { track ->
+                            !q.any { it.id == track.id }
+                        }
+                        if (related.isNotEmpty()) {
+                            val updatedQueue = q + related
+                            _queue.value = updatedQueue
+                            _currentQueueIndex.value = nextIdx
+                            _isLoading.value = false
+                            playResolvedTrack(updatedQueue[nextIdx])
+                        } else {
+                            // If no related tracks found, stop or wrap around
+                            if (isAutoPlay) {
+                                _isPlaying.value = false
+                                _currentPositionMs.value = 0L
+                                seekTo(0L)
+                            } else {
+                                val actualNextIdx = nextIdx % q.size
+                                _currentQueueIndex.value = actualNextIdx
+                                playResolvedTrack(q[actualNextIdx])
+                            }
+                            _isLoading.value = false
+                        }
+                    } else {
+                        _isLoading.value = false
+                    }
+                }
+                return
+            }
         }
         
         val actualNextIdx = nextIdx % q.size
@@ -478,7 +768,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         // If current song is > 3 seconds, restart it. Otherwise previous song.
         if (_currentPositionMs.value > 3000L) {
             _currentPositionMs.value = 0L
-            // Trigger a seek to 0 in UI player
+            seekTo(0L)
         } else {
             val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
             _currentQueueIndex.value = prevIdx
@@ -596,6 +886,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun onUserLoggedIn(uid: String) {
         if (currentUserId == uid) return
         currentUserId = uid
+        // Tag every crash with a stable anonymous ID for clustering by account
+        FirebaseCrashlytics.getInstance().setUserId(uid)
         viewModelScope.launch {
             // First time login on this device? We merge/pull from Firestore.
             val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
@@ -766,10 +1058,49 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     override fun onCleared() {
+        abandonAudioFocus()
         super.onCleared()
         if (instance == this) {
             instance = null
         }
+    }
+
+    private fun serializeTrackList(tracks: List<Track>): String {
+        val array = org.json.JSONArray()
+        tracks.forEach { track ->
+            val obj = org.json.JSONObject()
+            obj.put("id", track.id)
+            obj.put("title", track.title)
+            obj.put("artist", track.artist)
+            obj.put("album", track.album)
+            obj.put("thumbnailUrl", track.thumbnailUrl)
+            obj.put("duration", track.duration)
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun deserializeTrackList(json: String): List<Track> {
+        val list = mutableListOf<Track>()
+        try {
+            val array = org.json.JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    Track(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        artist = obj.getString("artist"),
+                        album = obj.optString("album", ""),
+                        thumbnailUrl = obj.getString("thumbnailUrl"),
+                        duration = obj.getString("duration")
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        return list
     }
 
     companion object {

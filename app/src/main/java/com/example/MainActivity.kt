@@ -29,9 +29,26 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
@@ -53,7 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.data.local.Playlist
-import com.example.data.model.CuratedTracks
+
 import com.example.data.model.Track
 import com.example.data.model.toTrack
 import com.example.ui.components.ClickWheel
@@ -85,6 +102,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        checkBatteryOptimizations()
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -129,6 +147,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun checkBatteryOptimizations() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Optimize Background Playback")
+                    .setMessage("To prevent the Android system from cutting off music playback in the background, please disable battery optimization for Verse.")
+                    .setPositiveButton("Configure") { _, _ ->
+                        try {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to open settings: ${e.message}")
+                        }
+                    }
+                    .setNegativeButton("Not Now", null)
+                    .show()
+            }
+        }
+    }
 }
 
 @Composable
@@ -143,12 +182,22 @@ fun iPodPlayerApp(
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var playlistToAddTo by remember { mutableStateOf<Track?>(null) }
     var showLyricsDialog by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<com.example.data.network.UpdateHelper.UpdateInfo?>(null) }
+    
+    LaunchedEffect(Unit) {
+        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+        val info = com.example.data.network.UpdateHelper.checkForUpdates(currentVersion)
+        if (info != null && info.isUpdateAvailable) {
+            updateInfo = info
+        }
+    }
     
     // Fetch state for UI
     val isExpanded by viewModel.isExpanded.collectAsState()
     val currentScreen by viewModel.currentScreen.collectAsState()
     val currentTrack by viewModel.currentTrack.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
+    val currentPositionMs by viewModel.currentPositionMs.collectAsState()
 
     // Back navigation logic
     var backPressTime by remember { mutableLongStateOf(0L) }
@@ -164,6 +213,34 @@ fun iPodPlayerApp(
                 Toast.makeText(context, "Swipe again to exit", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+    
+    // Update Dialog
+    if (updateInfo != null) {
+        AlertDialog(
+            onDismissRequest = { /* Mandatory update, cannot dismiss by tapping outside */ },
+            title = { Text("Update Available", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { 
+                Text("A new version (${updateInfo!!.latestVersion}) is available! You must update to the latest version to continue.", color = Color.White.copy(alpha=0.9f))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://verse.geetprince.me"))
+                        context.startActivity(intent)
+                        (context as? android.app.Activity)?.finish()
+                    }
+                ) {
+                    Text("Download Now", color = iPodAccentBlue, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { (context as? android.app.Activity)?.finish() }) {
+                    Text("Exit", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E2633)
+        )
     }
 
     // Base layout: Metallic iPod Hardware Device Frame
@@ -262,41 +339,11 @@ fun iPodPlayerApp(
 
     // Dialogue Overlay: Lyrics Screen
     if (showLyricsDialog) {
-        val lyrics = remember(currentTrack) {
-            getLyricsForTrack(currentTrack)
-        }
-        AlertDialog(
+        com.example.ui.components.SyncedLyricsDialog(
+            track = currentTrack,
+            currentPositionMs = currentPositionMs,
             onDismissRequest = { showLyricsDialog = false },
-            title = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    IconButton(onClick = { showLyricsDialog = false }) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 350.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = lyrics,
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 16.sp,
-                        lineHeight = 26.sp,
-                        fontFamily = FontFamily.SansSerif
-                    )
-                }
-            },
-            confirmButton = {},
-            containerColor = Color(0xFF151C26)
+            onSeek = { ms -> viewModel.seekTo(ms) }
         )
     }
 }
@@ -429,13 +476,7 @@ fun iPodDeviceFrame(
                         }
                     },
                     onPrevClick = {
-                        val now = System.currentTimeMillis()
-                        if (now - lastPrevClickTime < 450L) {
-                            viewModel.playPrevious()
-                        } else {
-                            viewModel.updateProgress(0L)
-                        }
-                        lastPrevClickTime = now
+                        viewModel.playPrevious()
                     },
                     onNextClick = { viewModel.playNext() },
                     onPlayPauseClick = { viewModel.togglePlayback() },
@@ -616,26 +657,40 @@ fun iPodScreenDisplay(
                     userScrollEnabled = isExpanded,
                     beyondViewportPageCount = 6
                 ) { pageIndex ->
-                    when (pageToScreen[pageIndex]) {
-                        ScreenType.EXPLORE -> ExploreScreen(viewModel = viewModel)
-                        ScreenType.LIKED -> LikedScreen(viewModel = viewModel)
-                        ScreenType.PLAYLISTS -> PlaylistsScreen(
-                            viewModel = viewModel,
-                            onCreatePlaylistClick = showCreatePlaylistDialog
-                        )
-                        ScreenType.SEARCH -> SearchScreen(viewModel = viewModel)
-                        ScreenType.QUEUE -> QueueScreen(viewModel = viewModel)
-                        ScreenType.NOW_PLAYING -> NowPlayingScreen(
-                            viewModel = viewModel,
-                            onAddTrackToPlaylist = onAddTrackToPlaylist,
-                            onShowLyrics = onShowLyrics
-                        )
-                        ScreenType.JAMMING -> JammingScreen(
-                            viewModel = viewModel,
-                            onAddTrackToPlaylist = onAddTrackToPlaylist,
-                            onShowLyrics = onShowLyrics
-                        )
-                        else -> {}
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                val absOffset = kotlin.math.abs(pageOffset)
+                                val fraction = 1f - absOffset.coerceIn(0f, 1f)
+                                
+                                scaleX = 0.85f + (0.15f * fraction)
+                                scaleY = 0.85f + (0.15f * fraction)
+                                alpha = 0.3f + (0.7f * fraction)
+                            }
+                    ) {
+                        when (pageToScreen[pageIndex]) {
+                            ScreenType.EXPLORE -> ExploreScreen(viewModel = viewModel)
+                            ScreenType.LIKED -> LikedScreen(viewModel = viewModel)
+                            ScreenType.PLAYLISTS -> PlaylistsScreen(
+                                viewModel = viewModel,
+                                onCreatePlaylistClick = showCreatePlaylistDialog
+                            )
+                            ScreenType.SEARCH -> SearchScreen(viewModel = viewModel)
+                            ScreenType.QUEUE -> QueueScreen(viewModel = viewModel)
+                            ScreenType.NOW_PLAYING -> NowPlayingScreen(
+                                viewModel = viewModel,
+                                onAddTrackToPlaylist = onAddTrackToPlaylist,
+                                onShowLyrics = onShowLyrics
+                            )
+                            ScreenType.JAMMING -> JammingScreen(
+                                viewModel = viewModel,
+                                onAddTrackToPlaylist = onAddTrackToPlaylist,
+                                onShowLyrics = onShowLyrics
+                            )
+                            else -> {}
+                        }
                     }
                 }
 
@@ -732,6 +787,184 @@ fun iPodStatusBar(
     }
 }
 
+@Composable
+fun SeekBar(
+    viewModel: MusicPlayerViewModel,
+    modifier: Modifier = Modifier
+) {
+    val progressMs by viewModel.currentPositionMs.collectAsState()
+    val durationMs by viewModel.durationMs.collectAsState()
+    val bufferedFraction by viewModel.bufferedFraction.collectAsState()
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableStateOf(0f) }
+
+    // Compute display fraction
+    val displayFraction = when {
+        isDragging -> dragFraction
+        durationMs > 0L -> (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        else -> 0f
+    }
+
+    // Smooth animation during playback; instant snap during drag
+    val animatedFraction by animateFloatAsState(
+        targetValue = displayFraction,
+        animationSpec = if (isDragging)
+            snap()
+        else
+            tween(durationMillis = 200, easing = FastOutSlowInEasing),
+        label = "SeekBarAnimation"
+    )
+
+    // If buffer data not coming in, show full bar so thumb is never hidden
+    val safeBufFraction = if (bufferedFraction <= 0.01f) 1f else bufferedFraction
+
+    val focusRequester = remember { FocusRequester() }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .focusRequester(focusRequester)
+            .focusable()
+            .semantics {
+                progressBarRangeInfo = ProgressBarRangeInfo(
+                    current = progressMs.toFloat(),
+                    range = 0f..maxOf(1f, durationMs.toFloat()),
+                    steps = 0
+                )
+                stateDescription = "${formatMs(progressMs)} of ${formatMs(durationMs)}"
+                setProgress { targetValue ->
+                    val targetMs = targetValue.toLong().coerceIn(0L, durationMs)
+                    viewModel.seekTo(targetMs)
+                    true
+                }
+            }
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    val stepMs = if (keyEvent.isShiftPressed) 15000L else 5000L
+                    when (keyEvent.key) {
+                        Key.DirectionLeft -> {
+                            val t = (progressMs - stepMs).coerceAtLeast(0L)
+                            viewModel.seekTo(t); true
+                        }
+                        Key.DirectionRight -> {
+                            val t = (progressMs + stepMs).coerceAtMost(durationMs)
+                            viewModel.seekTo(t); true
+                        }
+                        else -> false
+                    }
+                } else false
+            }
+    ) {
+        val widthPx = constraints.maxWidth.toFloat()
+        val widthDp = with(LocalDensity.current) { constraints.maxWidth.toDp() }
+        val thumbSize = 14.dp
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                // Drag gesture — updates dragFraction live while finger moves
+                .pointerInput(durationMs, widthPx) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            dragFraction = (offset.x / widthPx).coerceIn(0f, 1f)
+                            focusRequester.requestFocus()
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            dragFraction = (change.position.x / widthPx).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
+                            isDragging = false
+                            viewModel.seekTo(seekMs)
+                        },
+                        onDragCancel = {
+                            val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
+                            isDragging = false
+                            viewModel.seekTo(seekMs)
+                        }
+                    )
+                }
+                // Tap gesture — only fires when finger doesn't move (not a drag)
+                .pointerInput(durationMs, widthPx) {
+                    detectTapGestures(
+                        onTap = { offset ->
+                            if (durationMs > 0 && widthPx > 0) {
+                                val fraction = (offset.x / widthPx).coerceIn(0f, 1f)
+                                val seekMs = (fraction * durationMs).toLong().coerceIn(0L, durationMs)
+                                viewModel.seekTo(seekMs)
+                                focusRequester.requestFocus()
+                            }
+                        }
+                    )
+                }
+        ) {
+            // Track background
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
+            ) {
+                // Buffered range
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(safeBufFraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(Color.White.copy(alpha = 0.25f), RoundedCornerShape(2.dp))
+                )
+                // Played progress
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedFraction.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(iPodAccentBlue, RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Thumb
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = ((widthDp - thumbSize) * animatedFraction.coerceIn(0f, 1f)).coerceAtLeast(0.dp))
+                    .size(thumbSize)
+                    .background(Color.White, CircleShape)
+            )
+
+            // Drag tooltip
+            if (isDragging && durationMs > 0) {
+                val tooltipMs = (dragFraction * durationMs).toLong()
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(
+                            x = ((widthDp - 44.dp) * dragFraction).coerceAtLeast(0.dp),
+                            y = (-26).dp
+                        )
+                        .background(Color.Black.copy(0.85f), RoundedCornerShape(4.dp))
+                        .border(0.5.dp, Color.White.copy(0.2f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = formatMs(tooltipMs),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+
+
 // ==========================================
 // 1. NOW PLAYING SCREEN (COMPACT & DETAILS)
 // ==========================================
@@ -749,8 +982,12 @@ fun NowPlayingScreen(
     val isExpanded by viewModel.isExpanded.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
 
+    var isDragging by remember { mutableStateOf(false) }
+    var dragPositionMs by remember { mutableStateOf(0L) }
+    val displayPositionMs = if (isDragging) dragPositionMs else progressMs
+
     val coverArtHeight by animateDpAsState(
-        targetValue = if (isExpanded) 160.dp else 105.dp,
+        targetValue = if (isExpanded) 180.dp else 150.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -1039,6 +1276,19 @@ fun NowPlayingScreen(
                     Spacer(modifier = Modifier.weight(1f))
 
                     IconButton(
+                        onClick = { viewModel.toggleShuffle() },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        val isShuffle by viewModel.isShuffleEnabled.collectAsState()
+                        Icon(
+                            imageVector = Icons.Filled.Shuffle,
+                            contentDescription = "Shuffle",
+                            tint = if (isShuffle) iPodAccentBlue else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    IconButton(
                         onClick = { viewModel.toggleLikeTrack(currentTrack!!) },
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -1087,87 +1337,92 @@ fun NowPlayingScreen(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
-                    .pointerInput(durationMs) {
-                        detectTapGestures { offset ->
-                            val width = size.width
-                            if (width > 0 && durationMs > 0) {
-                                val fraction = offset.x / width
-                                val newPosMs = (fraction * durationMs).toLong().coerceIn(0L, durationMs)
-                                viewModel.seekTo(newPosMs)
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.CenterStart
+            SeekBar(viewModel = viewModel)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
+                Text(formatMs(displayPositionMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                Text(formatMs(durationMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+            }
+
+            // Bottom Actions (Lyrics, Queue, Devices, Volume)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Lyrics
+                Text(
+                    text = "Lyrics",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onShowLyrics() }
+                )
+
+                // Queue
+                Text(
+                    text = "Queue",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        viewModel.setExpanded(true)
+                        viewModel.setScreen(ScreenType.QUEUE)
+                    }
+                )
+
+                // Devices
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { /* Could show output device details */ }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(progressValue)
-                            .fillMaxHeight()
-                            .background(Color.White, RoundedCornerShape(2.dp))
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(formatMs(progressMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-                Text("-" + formatMs(maxOf(0L, durationMs - progressMs)),
-                    color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-            }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Filled.Headphones,
                         contentDescription = null,
                         tint = iPodAccentBlue,
-                        modifier = Modifier.size(12.dp)
+                        modifier = Modifier.size(10.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = outputDeviceName,
-                        color = Color.White.copy(alpha = 0.7f),
+                        text = "Devices",
+                        color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    IconButton(onClick = onShowLyrics, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            imageVector = Icons.Filled.Comment,
-                            contentDescription = "Lyrics",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { viewModel.setExpanded(true); viewModel.setScreen(ScreenType.QUEUE) },
-                        modifier = Modifier.size(24.dp)
+                // Volume Bar
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VolumeDown,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    val vol by viewModel.volume.collectAsState()
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(3.dp)
+                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(1.dp))
+                            .pointerInput(Unit) {
+                                detectTapGestures { offset ->
+                                    val newVol = (offset.x / 36.dp.toPx()).coerceIn(0f, 1f)
+                                    viewModel.setVolume(newVol)
+                                }
+                            }
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.QueueMusic,
-                            contentDescription = "Queue",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(14.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(vol)
+                                .fillMaxHeight()
+                                .background(iPodAccentBlue, RoundedCornerShape(1.dp))
                         )
                     }
                 }
@@ -2243,93 +2498,111 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Modern Search Header
+        // Modern Search Header (Apple Music inspired)
         Text(
             text = "Search",
             color = Color.White,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(bottom = 12.dp, top = 12.dp)
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(bottom = 16.dp, top = 8.dp)
         )
 
-        // Material3 search text field with system keyboard triggers
+        // Glassmorphism Search Bar
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("What do you want to listen to?", color = Color.White.copy(0.6f), fontSize = 14.sp, fontWeight = FontWeight.Bold) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
+            placeholder = { Text("Artists, songs, or podcasts", color = Color.White.copy(0.4f), fontSize = 16.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(0.7f)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
                     IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White)
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White.copy(0.7f))
                     }
                 }
             },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.Black,
-                unfocusedTextColor = Color.Black,
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedContainerColor = Color.White.copy(alpha = 0.1f),
+                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                focusedBorderColor = iPodAccentBlue.copy(alpha = 0.5f),
+                unfocusedBorderColor = Color.Transparent,
+                cursorColor = iPodAccentBlue
             ),
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(56.dp)
                 .testTag("youtube_search_input")
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         if (isSearching) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(30.dp))
+                CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(36.dp))
             }
         } else if (results.isEmpty() && query.isNotBlank()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No matching YouTube videos found.", color = Color.White, fontSize = 14.sp)
+                Text("No results found for \"$query\"", color = Color.Gray, fontSize = 16.sp)
             }
         } else if (results.isEmpty()) {
-            // Browse All Section
-            Spacer(modifier = Modifier.height(16.dp))
+            // Discover Section - Custom Aesthetic
             Text(
-                text = "Browse All",
+                text = "Discover",
                 color = Color.White,
-                fontSize = 18.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 12.dp)
+                modifier = Modifier.padding(bottom = 16.dp)
             )
             
-            val genres = listOf("Pop", "Hip-Hop", "Rock", "Electronic", "Classical", "Jazz", "Bollywood", "K-Pop")
-            val colors = listOf(Color(0xFFE91E63), Color(0xFF9C27B0), Color(0xFF3F51B5), Color(0xFF00BCD4), Color(0xFF4CAF50), Color(0xFFFF9800), Color(0xFFF44336), Color(0xFF009688))
+            val genres = listOf(
+                "Trending" to listOf(Color(0xFFFF512F), Color(0xFFDD2476)),
+                "New Releases" to listOf(Color(0xFF4776E6), Color(0xFF8E54E9)),
+                "Chill" to listOf(Color(0xFF00B4DB), Color(0xFF0083B0)),
+                "Workout" to listOf(Color(0xFFF09819), Color(0xFFEDDE5D)),
+                "Focus" to listOf(Color(0xFF3CA55C), Color(0xFFB5AC49)),
+                "Party" to listOf(Color(0xFF833ab4), Color(0xFFfd1d1d))
+            )
             
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 items(genres.size / 2) { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                         for (col in 0..1) {
                             val index = row * 2 + col
                             if (index < genres.size) {
+                                val item = genres[index]
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(90.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(colors[index % colors.size])
-                                        .clickable { viewModel.setSearchQuery(genres[index]) }
-                                        .padding(12.dp)
+                                        .height(100.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.linearGradient(colors = item.second)
+                                        )
+                                        .clickable { viewModel.setSearchQuery(item.first) }
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.BottomStart
                                 ) {
                                     Text(
-                                        text = genres[index],
+                                        text = item.first,
                                         color = Color.White,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        style = androidx.compose.ui.text.TextStyle(
+                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                color = Color.Black.copy(alpha = 0.2f),
+                                                offset = androidx.compose.ui.geometry.Offset(2f, 2f),
+                                                blurRadius = 4f
+                                            )
+                                        )
                                     )
                                 }
                             }
@@ -2338,20 +2611,21 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                 }
             }
         } else {
-            Spacer(modifier = Modifier.height(16.dp))
+            // Search Results layout
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 itemsIndexed(results) { index, track ->
                     val isFocused = index == focusedIndex
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isFocused) Color.White.copy(alpha = 0.2f)
+                                if (isFocused) Color.White.copy(alpha = 0.1f)
                                 else Color.Transparent
                             )
                             .clickable {
@@ -2366,11 +2640,11 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(4.dp))
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
                         )
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(16.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
@@ -2381,10 +2655,11 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = track.artist,
-                                color = Color.White.copy(0.6f),
-                                fontSize = 10.sp,
+                                color = Color.Gray,
+                                fontSize = 14.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

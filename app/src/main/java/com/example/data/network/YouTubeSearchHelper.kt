@@ -1,6 +1,7 @@
 package com.example.data.network
 
 import android.util.Log
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -40,7 +41,7 @@ object YouTubeSearchHelper {
             val parts = html.split("\"videoRenderer\":")
             for (i in 1 until parts.size) {
                 if (results.size >= 15) break
-                val part = parts[i]
+                val part = parts[i].take(3500)
                 
                 // Extract videoId
                 val videoId = extractValue(part, "\"videoId\":\"([a-zA-Z0-9_-]{11})\"") ?: continue
@@ -50,12 +51,18 @@ object YouTubeSearchHelper {
                 if (title == null) {
                     title = extractValue(part, "\"title\":\\{\"accessibility\":\\{\"accessibilityData\":\\{\"label\":\"([^\"]+)\"\\}\\}")
                 }
+                if (title == null) {
+                    title = extractValue(part, "\"title\":.*?\"text\":\"([^\"]+)\"")
+                }
                 title = title?.replace("\\u0026", "&")?.replace("\\\"", "\"") ?: "Unknown Video"
 
                 // Extract Artist / Channel Name
                 var artist = extractValue(part, "\"ownerText\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"\\}\\]")
                 if (artist == null) {
                     artist = extractValue(part, "\"longBylineText\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"\\}\\]")
+                }
+                if (artist == null) {
+                    artist = extractValue(part, "\"ownerText\":.*?\"text\":\"([^\"]+)\"")
                 }
                 artist = artist?.replace("\\u0026", "&") ?: "Unknown Artist"
 
@@ -78,6 +85,8 @@ object YouTubeSearchHelper {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error searching YouTube: ${e.message}", e)
+            FirebaseCrashlytics.getInstance().log("YouTubeSearch failed for query='${query.take(50)}'")
+            FirebaseCrashlytics.getInstance().recordException(e)
         }
         
         // Return results, falling back to empty if failed

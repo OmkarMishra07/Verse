@@ -44,8 +44,8 @@ class YouTubePlayerBridge(
 ) {
     @JavascriptInterface fun onPlayerReady()            = onReady()
     @JavascriptInterface fun onStateChange(state: Int) = onStateChange.invoke(state)
-    @JavascriptInterface fun onTimeUpdate(time: Float) = onTimeUpdate.invoke(time)
-    @JavascriptInterface fun onVideoDuration(d: Float) = onDuration.invoke(d)
+    @JavascriptInterface fun onTimeUpdate(timeStr: String) = onTimeUpdate.invoke(timeStr.toFloatOrNull() ?: 0f)
+    @JavascriptInterface fun onVideoDuration(dStr: String) = onDuration.invoke(dStr.toFloatOrNull() ?: 0f)
     @JavascriptInterface fun onPlayerError(error: Int) = onError.invoke(error)
 }
 
@@ -102,8 +102,11 @@ private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autopl
         setInterval(function() {
           if (player && player.getCurrentTime && player.getPlayerState() == 1) {
             if (window.AndroidPlayerBridge) {
-                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime());
-                AndroidPlayerBridge.onVideoDuration(player.getDuration());
+                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime().toString());
+                AndroidPlayerBridge.onVideoDuration(player.getDuration().toString());
+                if (typeof player.getVideoLoadedFraction === 'function') {
+                    AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction().toString());
+                }
             }
           }
         }, 500);
@@ -133,7 +136,7 @@ private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autopl
 """.trimIndent()
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Main embedded YouTube player — lives ONLY in NowPlayingScreen.
+//  Main embedded YouTube player — wraps the singleton WebViewHolder
 // ─────────────────────────────────────────────────────────────────────────────
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -143,93 +146,47 @@ fun YouTubeWebViewPlayer(
 ) {
     val context = LocalContext.current
 
-    val webView = remember {
-        object : WebView(context) {
-            override fun onWindowVisibilityChanged(visibility: Int) {
-                // Force Chromium to think it's always visible so it doesn't pause media
-                super.onWindowVisibilityChanged(android.view.View.VISIBLE)
-            }
-        }.apply {
-            settings.javaScriptEnabled                = true
-            settings.domStorageEnabled                = true
-            settings.mediaPlaybackRequiresUserGesture = false
-            settings.useWideViewPort                  = true
-            settings.loadWithOverviewMode             = true
-            clearCache(true)
-
-            webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
-
-            addJavascriptInterface(
-                YouTubePlayerBridge(
-                    onReady       = { viewModel.setLoading(false) },
-                    onStateChange = { code ->
-                        when (code) {
-                            1 -> { viewModel.setPlaying(true);  viewModel.setLoading(false) }
-                            2 -> { viewModel.setPlaying(false); viewModel.setLoading(false) }
-                            3 ->   viewModel.setLoading(true)
-                            0 ->   post { viewModel.playNext(isAutoPlay = true) }
-                        }
-                    },
-                    onTimeUpdate = { t -> viewModel.updateProgress((t * 1000).toLong()) },
-                    onDuration   = { d -> if (d > 0) viewModel.updateDuration((d * 1000).toLong()) },
-                    onError      = { err ->
-                        viewModel.setLoading(false)
-                        Log.e("YTWebView", "Player error: $err")
-                    }
-                ),
-                "AndroidPlayerBridge"
-            )
-        }
+    // Ensure the singleton WebView is initialized with this ViewModel
+    LaunchedEffect(Unit) {
+        com.example.WebViewHolder.init(context, viewModel)
     }
-
-    var lastLoadedId by remember { mutableStateOf("") }
 
     val track by viewModel.currentTrack.collectAsState()
-    LaunchedEffect(track?.id) {
+    val playTrigger by viewModel.playTrigger.collectAsState()
+
+    // Load / switch video whenever the current track changes or a new play is triggered
+    LaunchedEffect(track?.id, playTrigger) {
         val id = track?.id ?: return@LaunchedEffect
-        if (id == lastLoadedId) return@LaunchedEffect
-        lastLoadedId = id
-        
         val startSecs = (viewModel.currentPositionMs.value / 1000).toInt()
-        val autoplay = if (viewModel.isPlaying.value) 1 else 0
-        
-        // Use https://localhost as the base to emulate a normal web embed
-        val html = buildYouTubeIframeApiHtml(id, startSecs, autoplay)
-        webView.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
+        com.example.WebViewHolder.loadVideo(id, startSecs, viewModel.isPlaying.value)
     }
 
-    // Sync play / pause
+    // Sync play / pause state to the WebView
     val playing by viewModel.isPlaying.collectAsState()
     LaunchedEffect(playing) {
-        val js = if (playing)
-            "if(typeof player !== 'undefined' && player.playVideo) player.playVideo();"
-        else
-            "if(typeof player !== 'undefined' && player.pauseVideo) player.pauseVideo();"
-        webView.evaluateJavascript(js, null)
+        if (playing) com.example.WebViewHolder.play()
+        else com.example.WebViewHolder.pause()
     }
 
     // Sync volume
     val vol by viewModel.volume.collectAsState()
     LaunchedEffect(vol) {
-        // YouTube API volume is 0-100
-        val vol100 = (vol * 100).toInt()
-        webView.evaluateJavascript(
-            "if(typeof player !== 'undefined' && player.setVolume) player.setVolume($vol100);", null
-        )
+        com.example.WebViewHolder.setVolume((vol * 100).toInt())
     }
 
     // Sync seek request
     val seekRequest by viewModel.seekRequestMs.collectAsState()
     LaunchedEffect(seekRequest) {
         val ms = seekRequest ?: return@LaunchedEffect
-        webView.evaluateJavascript(
-            "if(typeof player !== 'undefined' && player.seekTo) player.seekTo(${ms / 1000f}, true);", null
-        )
+        com.example.WebViewHolder.seekTo(ms / 1000f)
         viewModel.clearSeekRequest()
     }
 
-    AndroidView(factory = { webView }, modifier = modifier)
+    // Display the singleton WebView inside this composable slot
+    val webView = com.example.WebViewHolder.getWebView()
+    if (webView != null) {
+        AndroidView(factory = { webView }, modifier = modifier)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
