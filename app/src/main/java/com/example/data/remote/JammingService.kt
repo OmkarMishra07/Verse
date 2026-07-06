@@ -13,12 +13,13 @@ import kotlinx.coroutines.tasks.await
 data class JammingRoom(
     val roomId: String = "",
     val hostId: String = "",
+    val hostName: String = "",
     val currentTrackId: String = "",
     val currentTrackTitle: String = "",
     val currentTrackArtist: String = "",
     val currentTrackThumbnail: String = "",
     val currentTrackDuration: String = "",
-    val isPlaying: Boolean = false,
+    val playing: Boolean = false,
     val positionMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
     val participants: List<String> = emptyList()
@@ -40,7 +41,7 @@ object JammingService {
 
     suspend fun createRoom(roomId: String, hostId: String, hostName: String): Boolean {
         return try {
-            val room = JammingRoom(roomId = roomId, hostId = hostId, participants = listOf(hostName))
+            val room = JammingRoom(roomId = roomId, hostId = hostId, hostName = hostName, participants = listOf(hostName))
             roomsCol().document(roomId).set(room).await()
             true
         } catch (e: Exception) {
@@ -77,7 +78,7 @@ object JammingService {
     ) {
         try {
             val updates = mutableMapOf<String, Any>(
-                "isPlaying" to isPlaying,
+                "playing" to isPlaying,
                 "positionMs" to positionMs,
                 "updatedAt" to System.currentTimeMillis()
             )

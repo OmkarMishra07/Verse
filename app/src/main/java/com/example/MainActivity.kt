@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
@@ -359,28 +360,12 @@ fun iPodDeviceFrame(
     currentUser: com.google.firebase.auth.FirebaseUser?,
     onLogout: () -> Unit
 ) {
-    val displayWeight by animateFloatAsState(
-        targetValue = if (isExpanded) 1.2f else 0.75f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "DisplayWeightAnimation"
-    )
-
-    val wheelSpacing by animateDpAsState(
-        targetValue = if (isExpanded) 12.dp else 28.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "WheelSpacingAnimation"
-    )
+    val displayWeight = 1.2f
+    val wheelSpacing = 12.dp
 
     var lastPrevClickTime by remember { mutableStateOf(0L) }
     var isFullScreen by remember { mutableStateOf(false) }
     val currentScreen by viewModel.currentScreen.collectAsState()
-    val showFullscreenBtn = !isExpanded && currentScreen == ScreenType.NOW_PLAYING
 
     Column(
         modifier = Modifier
@@ -418,70 +403,38 @@ fun iPodDeviceFrame(
             ) {
                 Spacer(modifier = Modifier.height(wheelSpacing))
 
-                // FULLSCREEN TOGGLE ROW — visible only on Now Playing collapsed view
-                if (showFullscreenBtn) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 6.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Search shortcut
-                        IconButton(
-                            onClick = { viewModel.setExpanded(true); viewModel.setScreen(ScreenType.SEARCH) },
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Search,
-                                contentDescription = "Search",
-                                tint = Color.White.copy(alpha = 0.8f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        // Fullscreen toggle
-                        IconButton(
-                            onClick = { isFullScreen = !isFullScreen },
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
-                        ) {
-                            Icon(
-                                imageVector = if (isFullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                                contentDescription = if (isFullScreen) "Exit Fullscreen" else "Fullscreen",
-                                tint = iPodAccentBlue,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                // TAC-TILE CLICK WHEEL
-                ClickWheel(
-                    viewModel = viewModel,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                    onMenuClick = {
-                        if (isExpanded) {
-                            if (viewModel.currentScreen.value == ScreenType.JAMMING) {
-                                viewModel.setScreen(ScreenType.NOW_PLAYING)
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    // TAC-TILE CLICK WHEEL
+                    ClickWheel(
+                        viewModel = viewModel,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        onMenuClick = {
+                            if (isExpanded) {
+                                if (viewModel.currentScreen.value == ScreenType.JAMMING) {
+                                    viewModel.setScreen(ScreenType.NOW_PLAYING)
+                                } else {
+                                    viewModel.setScreen(ScreenType.JAMMING)
+                                }
                             } else {
+                                viewModel.setExpanded(true)
                                 viewModel.setScreen(ScreenType.JAMMING)
                             }
-                        } else {
-                            viewModel.setExpanded(true)
-                            viewModel.setScreen(ScreenType.JAMMING)
-                        }
-                    },
-                    onPrevClick = {
-                        viewModel.playPrevious()
-                    },
-                    onNextClick = { viewModel.playNext() },
-                    onPlayPauseClick = { viewModel.togglePlayback() },
-                    onCenterClick = { viewModel.onCenterPressed() }
-                )
+                        },
+                        onPrevClick = {
+                            viewModel.playPrevious()
+                        },
+                        onNextClick = { viewModel.playNext() },
+                        onPlayPauseClick = { viewModel.togglePlayback() },
+                        onCenterClick = { viewModel.onCenterPressed() }
+                    )
+
+                    VolumeControlPopup(
+                        viewModel = viewModel,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(end = 24.dp)
+                    )
+                }
             }
         }
 
@@ -654,7 +607,7 @@ fun iPodScreenDisplay(
                     modifier = Modifier
                         .fillMaxSize()
                         .alpha(if (isOverlayScreen) 0f else 1f),
-                    userScrollEnabled = isExpanded,
+                    userScrollEnabled = true,
                     beyondViewportPageCount = 6
                 ) { pageIndex ->
                     Box(
@@ -1375,9 +1328,33 @@ fun NowPlayingScreen(
                 )
 
                 // Devices
+                val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                var deviceName by remember { mutableStateOf("Speaker") }
+                
+                LaunchedEffect(Unit) {
+                    while(true) {
+                        val devices = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+                        val active = devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET }
+                            ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET }
+                            ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                        
+                        deviceName = active?.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Speaker"
+                        kotlinx.coroutines.delay(2000)
+                    }
+                }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { /* Could show output device details */ }
+                    modifier = Modifier.clickable {
+                        try {
+                            val intent = android.content.Intent("com.android.settings.panel.action.MEDIA_OUTPUT").apply {
+                                putExtra("com.android.settings.panel.extra.PACKAGE_NAME", context.packageName)
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Media output switcher not found", e)
+                        }
+                    }
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Headphones,
@@ -1387,44 +1364,91 @@ fun NowPlayingScreen(
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = "Devices",
+                        text = deviceName,
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 100.dp)
                     )
                 }
+            }
+        }
+    }
+}
 
-                // Volume Bar
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+// ==========================================
+// VOLUME CONTROL POPUP
+// ==========================================
+@Composable
+fun VolumeControlPopup(viewModel: MusicPlayerViewModel, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    val vol by viewModel.volume.collectAsState()
+    
+    LaunchedEffect(expanded, vol) {
+        if (expanded) {
+            kotlinx.coroutines.delay(3000)
+            expanded = false
+        }
+    }
+    
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        IconButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier
+                .size(32.dp)
+                .background(Color.White.copy(alpha = 0.08f), androidx.compose.foundation.shape.CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.VolumeUp,
+                contentDescription = "Volume",
+                tint = iPodAccentBlue,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        
+        androidx.compose.animation.AnimatedVisibility(
+            visible = expanded,
+            enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .width(32.dp)
+                    .height(100.dp)
+                    .background(Color.White.copy(0.1f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight()
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures { change, dragAmount ->
+                                change.consume()
+                                val newVol = (vol - dragAmount / 100.dp.toPx()).coerceIn(0f, 1f)
+                                viewModel.setVolume(newVol)
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val newVol = (1f - (offset.y / 100.dp.toPx())).coerceIn(0f, 1f)
+                                viewModel.setVolume(newVol)
+                            }
+                        }
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.VolumeDown,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.6f),
-                        modifier = Modifier.size(10.dp)
-                    )
-                    val vol by viewModel.volume.collectAsState()
                     Box(
                         modifier = Modifier
-                            .width(36.dp)
-                            .height(3.dp)
-                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(1.dp))
-                            .pointerInput(Unit) {
-                                detectTapGestures { offset ->
-                                    val newVol = (offset.x / 36.dp.toPx()).coerceIn(0f, 1f)
-                                    viewModel.setVolume(newVol)
-                                }
-                            }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(vol)
-                                .fillMaxHeight()
-                                .background(iPodAccentBlue, RoundedCornerShape(1.dp))
-                        )
-                    }
+                            .fillMaxWidth()
+                            .fillMaxHeight(vol)
+                            .align(Alignment.BottomCenter)
+                            .background(iPodAccentBlue, RoundedCornerShape(16.dp))
+                    )
                 }
             }
         }
@@ -1441,133 +1465,73 @@ fun JammingScreen(
     onShowLyrics: () -> Unit
 ) {
     val context = LocalContext.current
-    var inRoom by remember { mutableStateOf(false) }
-    var roomCode by remember { mutableStateOf("") }
+    var inputRoomCode by remember { mutableStateOf("") }
     var showChat by remember { mutableStateOf(false) }
     var showShareDialog by remember { mutableStateOf(false) }
-    var isHost by remember { mutableStateOf(false) }
-    
-    var myName by remember { mutableStateOf("User-${(100..999).random()}") }
     
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val progressMs by viewModel.currentPositionMs.collectAsState()
+    
+    val jammingRoomId by viewModel.jammingRoomId.collectAsState()
+    val roomState by viewModel.jammingRoomState.collectAsState()
+    val inRoom = jammingRoomId.isNotBlank()
 
-    val roomState by remember(inRoom, roomCode) {
-        if (inRoom && roomCode.isNotBlank()) com.example.data.remote.JammingService.listenToRoom(roomCode) else kotlinx.coroutines.flow.flowOf(null)
-    }.collectAsState(initial = null)
-
-    val chatMessages by remember(inRoom, roomCode) {
-        if (inRoom && roomCode.isNotBlank()) com.example.data.remote.JammingService.listenToMessages(roomCode) else kotlinx.coroutines.flow.flowOf(emptyList())
+    val chatMessages by remember(jammingRoomId) {
+        if (jammingRoomId.isNotBlank()) com.example.data.remote.JammingService.listenToMessages(jammingRoomId) else kotlinx.coroutines.flow.flowOf(emptyList())
     }.collectAsState(initial = emptyList())
 
     val coroutineScope = rememberCoroutineScope()
-
-    // Host: Sync immediately on track or playing state change
-    LaunchedEffect(isHost, currentTrack, isPlaying) {
-        if (isHost && inRoom && roomCode.isNotBlank()) {
-            com.example.data.remote.JammingService.updateRoomState(roomCode, currentTrack, isPlaying, viewModel.currentPositionMs.value)
-        }
-    }
     
-    // Host: Sync position periodically
-    LaunchedEffect(isHost, inRoom, roomCode) {
-        if (isHost && inRoom && roomCode.isNotBlank()) {
-            while (true) {
-                com.example.data.remote.JammingService.updateRoomState(roomCode, currentTrack, isPlaying, viewModel.currentPositionMs.value)
-                kotlinx.coroutines.delay(10000)
-            }
-        }
-    }
-
-    // Guest: Sync from Firestore
-    LaunchedEffect(roomState) {
-        if (!isHost && inRoom && roomState != null) {
-            val state = roomState!!
-            if (state.currentTrackId.isNotBlank() && currentTrack?.id != state.currentTrackId) {
-                val track = com.example.data.model.Track(
-                    id = state.currentTrackId,
-                    title = state.currentTrackTitle,
-                    artist = state.currentTrackArtist,
-                    thumbnailUrl = state.currentTrackThumbnail,
-                    duration = state.currentTrackDuration,
-                    album = ""
-                )
-                viewModel.selectAndPlayTrack(track)
-            }
-            if (state.isPlaying != isPlaying) {
-                viewModel.setPlaying(state.isPlaying)
-            }
-            val elapsed = System.currentTimeMillis() - state.updatedAt
-            val expectedMs = if (state.isPlaying) state.positionMs + elapsed else state.positionMs
-            if (Math.abs(expectedMs - progressMs) > 3000) {
-                viewModel.seekTo(expectedMs)
-            }
-        }
-    }
+    val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+    val myName = currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "User-${(100..999).random()}"
 
     if (!inRoom) {
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text("Jamming Session", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(20.dp))
+            Text("Jamming Session", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Listen together with friends in real-time", color = Color.Gray, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(32.dp))
             OutlinedTextField(
-                value = myName,
-                onValueChange = { myName = it },
-                label = { Text("Your Name", color = Color.Gray) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = roomCode,
-                onValueChange = { roomCode = it },
+                value = inputRoomCode,
+                onValueChange = { inputRoomCode = it.uppercase() },
                 label = { Text("Room Code", color = Color.Gray) },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
                 )
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = { 
-                val code = roomCode.trim()
-                val name = myName.trim()
-                if (code.isNotEmpty() && name.isNotEmpty()) {
+                val code = inputRoomCode.trim()
+                if (code.isNotEmpty()) {
                     coroutineScope.launch {
-                        val success = com.example.data.remote.JammingService.joinRoom(code, name)
+                        val success = com.example.data.remote.JammingService.joinRoom(code, myName)
                         if (success) {
-                            roomCode = code
-                            myName = name
-                            isHost = false
-                            inRoom = true
+                            viewModel.setJammingRoomId(code)
                         } else {
-                            android.widget.Toast.makeText(context, "Failed to join room. Check code or connection.", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "Failed to join room. Check code.", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue)) {
+            }, colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue), modifier = Modifier.fillMaxWidth(0.6f)) {
                 Text("Join Room")
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("OR", color = Color.Gray)
+            Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = { 
-                val code = "ROOM-${(1000..9999).random()}"
-                val name = myName.trim()
-                if (name.isNotEmpty()) {
-                    coroutineScope.launch { 
-                        val success = com.example.data.remote.JammingService.createRoom(code, "host", name) 
-                        if (success) {
-                            roomCode = code
-                            myName = name
-                            isHost = true
-                            inRoom = true
-                        } else {
-                            android.widget.Toast.makeText(context, "Failed to create room.", android.widget.Toast.LENGTH_SHORT).show()
-                        }
+                val charPool : List<Char> = ('A'..'Z') + ('0'..'9')
+                val code = (1..5).map { charPool.random() }.joinToString("")
+                coroutineScope.launch { 
+                    val success = com.example.data.remote.JammingService.createRoom(code, currentUser?.uid ?: "host", myName) 
+                    if (success) {
+                        viewModel.setJammingRoomId(code)
+                    } else {
+                        android.widget.Toast.makeText(context, "Failed to create room.", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)) {
-                Text("Create Room")
+            }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray), modifier = Modifier.fillMaxWidth(0.6f)) {
+                Text("Create New Room")
             }
         }
     } else {
@@ -1577,16 +1541,12 @@ fun JammingScreen(
                 title = { Text("Share Room", color = Color.White) },
                 text = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        Text("Room Code: $roomCode", color = Color.White)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Box(modifier = Modifier.size(150.dp).background(Color.White), contentAlignment = Alignment.Center) {
-                            Text("QR Code\n(Placeholder)", color = Color.Black, textAlign = TextAlign.Center)
-                        }
+                        Text("Room Code: $jammingRoomId", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(onClick = {
                             val sendIntent = android.content.Intent().apply {
                                 action = android.content.Intent.ACTION_SEND
-                                putExtra(android.content.Intent.EXTRA_TEXT, "Join my jamming session! Room Code: $roomCode")
+                                putExtra(android.content.Intent.EXTRA_TEXT, "Join my jamming session! Room Code: $jammingRoomId")
                                 type = "text/plain"
                             }
                             context.startActivity(android.content.Intent.createChooser(sendIntent, null))
@@ -1595,80 +1555,146 @@ fun JammingScreen(
                         }
                     }
                 },
-                confirmButton = {
-                    TextButton(onClick = { showShareDialog = false }) {
-                        Text("Close")
-                    }
-                },
+                confirmButton = { TextButton(onClick = { showShareDialog = false }) { Text("Close") } },
                 containerColor = Color.DarkGray
             )
         }
 
         if (showChat) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
                 Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Chat - Room: $roomCode", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Room Chat", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = { showChat = false }) {
                         Icon(Icons.Default.Close, contentDescription = "Close Chat", tint = Color.White)
                     }
                 }
-                if (roomState?.participants?.isNotEmpty() == true) {
-                    Text("Joined: ${roomState!!.participants.joinToString()}", color = iPodAccentBlue, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
-                }
-                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                
+                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(chatMessages.size) { index ->
                         val msg = chatMessages[index]
-                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                            Text("${msg.senderName}: ", color = iPodAccentBlue, fontWeight = FontWeight.Bold)
-                            Text(msg.message, color = Color.White)
+                        val isMe = msg.senderName == myName
+                        val isSystem = msg.senderName == "System"
+                        
+                        if (isSystem) {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Text(msg.message, color = Color.Gray, fontSize = 12.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, modifier = Modifier.background(Color.DarkGray.copy(alpha=0.3f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp))
+                            }
+                        } else {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start) {
+                                Column(modifier = Modifier.fillMaxWidth(0.8f), horizontalAlignment = if (isMe) Alignment.End else Alignment.Start) {
+                                    if (!isMe) {
+                                        Text(msg.senderName, color = Color.Gray, fontSize = 10.sp, modifier = Modifier.padding(bottom = 2.dp, start = 4.dp))
+                                    }
+                                    Box(modifier = Modifier.background(if (isMe) iPodAccentBlue else Color(0xFF2C2C2C), RoundedCornerShape(12.dp)).padding(12.dp)) {
+                                        Text(msg.message, color = Color.White, fontSize = 14.sp)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                
                 var chatMsg by remember { mutableStateOf("") }
-                Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = chatMsg,
                         onValueChange = { chatMsg = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Type a message...", color = Color.Gray) },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+                        placeholder = { Text("Message...", color = Color.Gray) },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent, focusedContainerColor = Color(0xFF2C2C2C), unfocusedContainerColor = Color(0xFF2C2C2C))
                     )
-                    IconButton(onClick = {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(iPodAccentBlue).clickable {
                         if (chatMsg.isNotBlank()) {
-                            coroutineScope.launch { com.example.data.remote.JammingService.sendMessage(roomCode, myName, chatMsg) }
+                            coroutineScope.launch { com.example.data.remote.JammingService.sendMessage(jammingRoomId, myName, chatMsg) }
                             chatMsg = ""
                         }
-                    }) {
-                        Icon(Icons.Default.Send, contentDescription = "Send", tint = iPodAccentBlue)
+                    }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
             }
         } else {
-            Box(modifier = Modifier.fillMaxSize()) {
-                NowPlayingScreen(
-                    viewModel = viewModel,
-                    onAddTrackToPlaylist = onAddTrackToPlaylist,
-                    onShowLyrics = onShowLyrics
-                )
-                
-                Row(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
-                    IconButton(onClick = { showShareDialog = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+            Column(modifier = Modifier.fillMaxSize().background(Color(0xFF121212))) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text("${roomState?.hostName ?: "Unknown"}'s Room", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("Code: $jammingRoomId", color = iPodAccentBlue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    IconButton(onClick = { 
-                        coroutineScope.launch { com.example.data.remote.JammingService.leaveRoom(roomCode, myName) }
-                        inRoom = false 
-                    }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red)
+                    Row {
+                        IconButton(onClick = { showShareDialog = true }) {
+                            Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+                        }
+                        IconButton(onClick = { 
+                            coroutineScope.launch { com.example.data.remote.JammingService.leaveRoom(jammingRoomId, myName) }
+                            viewModel.setJammingRoomId("")
+                        }) {
+                            Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red)
+                        }
                     }
                 }
                 
-                FloatingActionButton(
+                if (roomState?.participants?.isNotEmpty() == true) {
+                    Text("Listeners (${roomState!!.participants.size})", color = Color.Gray, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), fontSize = 12.sp)
+                    LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(roomState!!.participants.size) { index ->
+                            val participant = roomState!!.participants[index]
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(modifier = Modifier.size(50.dp).clip(CircleShape).background(Color.DarkGray), contentAlignment = Alignment.Center) {
+                                    Text(participant.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(participant, color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.weight(1f))
+                
+                if (currentTrack != null) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        coil.compose.AsyncImage(
+                            model = currentTrack?.thumbnailUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(220.dp).clip(RoundedCornerShape(12.dp))
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(currentTrack?.title ?: "", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                        Text(currentTrack?.artist ?: "", color = Color.Gray, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                        
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { viewModel.playPrevious() }, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(36.dp))
+                            }
+                            FloatingActionButton(
+                                onClick = { viewModel.togglePlayback() },
+                                containerColor = iPodAccentBlue,
+                                modifier = Modifier.size(72.dp),
+                                shape = CircleShape
+                            ) {
+                                Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(36.dp))
+                            }
+                            IconButton(onClick = { viewModel.playNext() }, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(36.dp))
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.weight(1f))
+                
+                Button(
                     onClick = { showChat = true },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 48.dp).size(48.dp),
-                    containerColor = iPodAccentBlue
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
                 ) {
-                    Icon(Icons.Default.Chat, contentDescription = "Open Chat", tint = Color.White)
+                    Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open Room Chat")
                 }
             }
         }

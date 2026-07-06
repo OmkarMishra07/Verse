@@ -29,6 +29,7 @@ object WebViewHolder {
     private var isInitialized = false
     private var hasLoadedFirstVideo = false
     private var lastLoadedVideoId: String? = null
+    private var lastAutoplay: Boolean = true
     private var lastLoadTime: Long = 0L
 
     /**
@@ -97,11 +98,13 @@ object WebViewHolder {
 
         // Deduplicate rapid dual-calls from UI and Background Service
         val now = System.currentTimeMillis()
-        if (videoId == lastLoadedVideoId && (now - lastLoadTime) < 2000L) {
+        // If the new call has autoplay=true but the old one had autoplay=false, let it pass to upgrade the video to playing
+        if (videoId == lastLoadedVideoId && (!autoplay || lastAutoplay) && (now - lastLoadTime) < 2000L) {
             Log.d("WebViewHolder", "Ignoring duplicate loadVideo for $videoId")
             return
         }
         lastLoadedVideoId = videoId
+        lastAutoplay = autoplay
         lastLoadTime = now
 
         wv.post {

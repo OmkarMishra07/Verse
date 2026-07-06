@@ -71,9 +71,9 @@ class VerseMusicService : MediaSessionService() {
     private var isReceiverRegistered = false
 
     private val noisyReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                MusicPlayerViewModel.instance?.setPlaying(false)
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                MusicPlayerViewModel.instance?.setPlaying(false, fromUser = true)
             }
         }
     }
@@ -185,11 +185,11 @@ class VerseMusicService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val vm = MusicPlayerViewModel.instance
         when (intent?.action) {
-            ACTION_PLAY  -> vm?.setPlaying(true)
-            ACTION_PAUSE -> vm?.setPlaying(false)
+            ACTION_PLAY  -> vm?.setPlaying(true, fromUser = true)
+            ACTION_PAUSE -> vm?.setPlaying(false, fromUser = true)
             ACTION_NEXT  -> vm?.playNext()
             ACTION_PREV  -> vm?.playPrevious()
-            ACTION_STOP  -> { vm?.setPlaying(false); stopSelf() }
+            ACTION_STOP  -> { vm?.setPlaying(false, fromUser = true); stopSelf() }
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -428,7 +428,7 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
     // ── Command handlers — called when system controls issue commands ──────────
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
-        MusicPlayerViewModel.instance?.setPlaying(playWhenReady)
+        MusicPlayerViewModel.instance?.setPlaying(playWhenReady, fromUser = true)
         return Futures.immediateVoidFuture()
     }
 
@@ -448,7 +448,7 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
     }
 
     override fun handleStop(): ListenableFuture<*> {
-        MusicPlayerViewModel.instance?.setPlaying(false)
+        MusicPlayerViewModel.instance?.setPlaying(false, fromUser = true)
         return Futures.immediateVoidFuture()
     }
 
