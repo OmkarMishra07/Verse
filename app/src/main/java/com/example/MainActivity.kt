@@ -226,7 +226,7 @@ fun iPodPlayerApp(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(updateInfo!!.releaseUrl))
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://verse.geetprince.me"))
                         context.startActivity(intent)
                         (context as? android.app.Activity)?.finish()
                     }
