@@ -182,6 +182,15 @@ fun iPodPlayerApp(
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var playlistToAddTo by remember { mutableStateOf<Track?>(null) }
     var showLyricsDialog by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<com.example.data.network.UpdateHelper.UpdateInfo?>(null) }
+    
+    LaunchedEffect(Unit) {
+        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+        val info = com.example.data.network.UpdateHelper.checkForUpdates(currentVersion)
+        if (info != null && info.isUpdateAvailable) {
+            updateInfo = info
+        }
+    }
     
     // Fetch state for UI
     val isExpanded by viewModel.isExpanded.collectAsState()
@@ -204,6 +213,34 @@ fun iPodPlayerApp(
                 Toast.makeText(context, "Swipe again to exit", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+    
+    // Update Dialog
+    if (updateInfo != null) {
+        AlertDialog(
+            onDismissRequest = { /* Mandatory update, cannot dismiss by tapping outside */ },
+            title = { Text("Update Available", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { 
+                Text("A new version (${updateInfo!!.latestVersion}) is available! You must update to the latest version to continue.", color = Color.White.copy(alpha=0.9f))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(updateInfo!!.releaseUrl))
+                        context.startActivity(intent)
+                        (context as? android.app.Activity)?.finish()
+                    }
+                ) {
+                    Text("Download Now", color = iPodAccentBlue, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { (context as? android.app.Activity)?.finish() }) {
+                    Text("Exit", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E2633)
+        )
     }
 
     // Base layout: Metallic iPod Hardware Device Frame
