@@ -191,8 +191,7 @@ fun iPodPlayerApp(
     val greetingText = when (currentHour) {
         in 5..11 -> "Good morning"
         in 12..16 -> "Good afternoon"
-        in 17..20 -> "Good evening"
-        else -> "Good night"
+        else -> "Good evening"
     }
     val userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
     val fullGreeting = "$greetingText, $userName."
