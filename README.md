@@ -13,7 +13,7 @@ With Verse, you can not only listen to your favorite local music, but also join 
 - **Media Controls:** Full foreground service support for music playback, including lock screen and notification controls.
 
 ## Screenshots
-*(Add screenshots of your app here)*
+*(om screenshot daal de bhai ismein)*
 
 ## How to Run Locally
 
