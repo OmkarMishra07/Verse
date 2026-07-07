@@ -44,3 +44,16 @@ To build and run the application on your own machine, follow these steps:
 
 ## License
 [MIT License](LICENSE)
+
+## Contributors
+
+Built with ❤️ by:
+
+<div style="display: flex; gap: 10px;">
+  <a href="https://github.com/OmkarMishra07">
+      <img src="https://github.com/OmkarMishra07.png" width="60" height="60" style="border-radius: 50%;" title="Omkar Mishra">
+  </a>
+  <a href="https://github.com/Geet-Prince">
+      <img src="https://github.com/Geet-Prince.png" width="60" height="60" style="border-radius: 50%;" title="Prince Raj">
+  </a>
+</div>
