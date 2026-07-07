@@ -792,6 +792,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) right after track change")
             return
         }
+        if (!playing && !fromUser) {
+            val roomId = _jammingRoomId.value
+            val roomState = _jammingRoomState.value
+            if (roomId.isNotBlank() && roomState?.playing == true) {
+                Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) because room state requires playing")
+                com.example.WebViewHolder.play()
+                return
+            }
+        }
         _isPlaying.value = playing
         if (fromUser) {
             pushJammingState()
