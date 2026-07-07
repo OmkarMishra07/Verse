@@ -2604,6 +2604,11 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
     val focusedIndex by viewModel.focusedIndex.collectAsState()
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     LaunchedEffect(focusedIndex) {
         if (focusedIndex in results.indices) {
@@ -2639,6 +2644,8 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                 }
             },
             singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White,
@@ -2652,6 +2659,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
+                .focusRequester(focusRequester)
                 .testTag("youtube_search_input")
         )
 

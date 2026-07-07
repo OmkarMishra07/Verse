@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import com.example.data.model.Track
@@ -151,36 +153,47 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
                 var chatSearchQuery by remember { mutableStateOf("") }
                 var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
                 var isSearching by remember { mutableStateOf(false) }
+                val focusRequester = remember { FocusRequester() }
+                
+                LaunchedEffect(showChatSearch) {
+                    if (showChatSearch) {
+                        focusRequester.requestFocus()
+                    }
+                }
+                
+                val performSearch = {
+                    if (chatSearchQuery.isNotBlank()) {
+                        isSearching = true
+                        coroutineScope.launch {
+                            try {
+                                searchResults = com.example.data.network.YouTubeSearchHelper.search(chatSearchQuery).map { yt -> 
+                                    Track(id = yt.videoId, title = yt.title, artist = yt.artist, album = "YouTube", thumbnailUrl = yt.thumbnailUrl, duration = yt.duration) 
+                                }
+                            } finally {
+                                isSearching = false
+                            }
+                        }
+                    }
+                }
                 
                 Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(12.dp).heightIn(max = 250.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = chatSearchQuery,
                             onValueChange = { chatSearchQuery = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
                             placeholder = { Text("Search YouTube...", color = Color.Gray) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { performSearch() }),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White, unfocusedTextColor = Color.White,
                                 focusedBorderColor = Color(0xFF00C853), unfocusedBorderColor = Color.DarkGray
                             )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(onClick = {
-                            if (chatSearchQuery.isNotBlank()) {
-                                isSearching = true
-                                coroutineScope.launch {
-                                    try {
-                                        searchResults = com.example.data.network.YouTubeSearchHelper.search(chatSearchQuery).map { yt -> 
-                                            Track(id = yt.videoId, title = yt.title, artist = yt.artist, album = "YouTube", thumbnailUrl = yt.thumbnailUrl, duration = yt.duration) 
-                                        }
-                                    } finally {
-                                        isSearching = false
-                                    }
-                                }
-                            }
-                        }) {
+                        IconButton(onClick = { performSearch() }) {
                             Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
                         }
                     }
