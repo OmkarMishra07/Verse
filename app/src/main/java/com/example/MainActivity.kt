@@ -1629,7 +1629,7 @@ fun JammingScreen(
                 var jamSearchQuery by remember { mutableStateOf("") }
                 var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
                 var isSearching by remember { mutableStateOf(false) }
-                val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+                val focusRequester = remember { FocusRequester() }
                 
                 LaunchedEffect(showJamSearch) {
                     if (showJamSearch) {
@@ -1657,7 +1657,7 @@ fun JammingScreen(
                         androidx.compose.material3.OutlinedTextField(
                             value = jamSearchQuery,
                             onValueChange = { jamSearchQuery = it },
-                            modifier = Modifier.weight(1f).androidx.compose.ui.focus.focusRequester(focusRequester),
+                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
                             placeholder = { Text("Search YouTube...", color = Color.Gray) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
