@@ -45,10 +45,13 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
+      - name: Rename APK
+        run: mv apks/Verse.apk "apks/verse-${{ github.ref_name }}.apk"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: apks/Verse.apk
+          files: apks/verse-${{ github.ref_name }}.apk
           name: Release ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
