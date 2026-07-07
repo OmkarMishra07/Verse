@@ -106,6 +106,14 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _showQuickAccess = MutableStateFlow(false)
     val showQuickAccess = _showQuickAccess.asStateFlow()
 
+    private val _isChatOpen = MutableStateFlow(false)
+    val isChatOpen = _isChatOpen.asStateFlow()
+    fun setIsChatOpen(open: Boolean) { _isChatOpen.value = open }
+
+    private val _hasUnreadMessages = MutableStateFlow(false)
+    val hasUnreadMessages = _hasUnreadMessages.asStateFlow()
+    fun setHasUnreadMessages(unread: Boolean) { _hasUnreadMessages.value = unread }
+
     enum class ExploreRegion { GLOBAL, INDIA }
     
     private val _exploreRegion = MutableStateFlow(ExploreRegion.GLOBAL)
@@ -159,7 +167,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun syncFromRemote(state: com.example.data.remote.JammingRoom) {
-        if (System.currentTimeMillis() - lastLocalActionTime < 2500L) return
+        // If the incoming remote state is older than or equal to our last local action, 
+        // it means this is either an echo of our own action or an outdated event due to network delay.
+        // We ignore it to prevent jitter.
+        if (state.updatedAt <= lastLocalActionTime) return
         
         if (_isPlaying.value != state.playing) {
             _isPlaying.value = state.playing
@@ -730,6 +741,36 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun selectAndPlayTrackNoRedirect(track: Track, newQueue: List<Track> = queue.value) {
+        viewModelScope.launch {
+            val isSingleSong = newQueue.size <= 1 || !newQueue.any { it.id == track.id }
+            if (isSingleSong) {
+                _queue.value = listOf(track)
+                _currentQueueIndex.value = 0
+                playResolvedTrack(track)
+                launch {
+                    val related = generateRelatedTracks(track)
+                    val currentQueue = _queue.value.toMutableList()
+                    related.forEach { r ->
+                        if (currentQueue.none { it.id == r.id }) currentQueue.add(r)
+                    }
+                    _queue.value = currentQueue
+                }
+            } else {
+                val idx = newQueue.indexOfFirst { it.id == track.id }
+                if (idx != -1) {
+                    _queue.value = newQueue
+                    _currentQueueIndex.value = idx
+                } else {
+                    val updated = listOf(track) + newQueue.filter { it.id != track.id }
+                    _queue.value = updated
+                    _currentQueueIndex.value = 0
+                }
+                playResolvedTrack(track)
+            }
+        }
+    }
+
     fun togglePlayback() {
         setPlaying(!_isPlaying.value, fromUser = true)
     }
@@ -742,6 +783,14 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _isPlaying.value = playing
         if (fromUser) {
             pushJammingState()
+            val roomId = _jammingRoomId.value
+            if (roomId.isNotBlank()) {
+                val action = if (playing) "resumed" else "paused"
+                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+                viewModelScope.launch {
+                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName $action the playback")
+                }
+            }
         }
     }
 
