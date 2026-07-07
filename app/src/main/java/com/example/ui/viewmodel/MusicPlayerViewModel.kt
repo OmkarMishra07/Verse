@@ -140,6 +140,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _bollywoodHits = MutableStateFlow<List<Track>>(emptyList())
     val bollywoodHits = _bollywoodHits.asStateFlow()
 
+    private val _globalOrLocalHits = MutableStateFlow<List<Track>>(emptyList())
+    val globalOrLocalHits = _globalOrLocalHits.asStateFlow()
+
+    private val _moodTracks = MutableStateFlow<List<Track>>(emptyList())
+    val moodTracks = _moodTracks.asStateFlow()
+
+    private val _partyTracks = MutableStateFlow<List<Track>>(emptyList())
+    val partyTracks = _partyTracks.asStateFlow()
+
     private val _isExploreLoading = MutableStateFlow(false)
     val isExploreLoading = _isExploreLoading.asStateFlow()
 
@@ -231,6 +240,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
                 val bollywoodResults = YouTubeSearchHelper.search("latest trending bollywood hit songs")
                 _bollywoodHits.value = bollywoodResults.map { it.toTrack("Bollywood Hits") }
+
+                val globalLocalResults = ITunesHelper.getTopSongs(!isIndia)
+                _globalOrLocalHits.value = globalLocalResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
+
+                val moodResults = YouTubeSearchHelper.search(if (isIndia) "latest romantic lo-fi chill indian songs" else "latest chill vibes lofi pop songs")
+                _moodTracks.value = moodResults.map { it.toTrack("Mood & Chill") }
+
+                val partyResults = YouTubeSearchHelper.search(if (isIndia) "latest party dance hits punjabi bollywood" else "latest EDM dance club hits")
+                _partyTracks.value = partyResults.map { it.toTrack("Party & Dance") }
             } catch (e: Exception) {
                 Log.e("MusicPlayerViewModel", "Error fetching explore content: ${e.message}")
             } finally {

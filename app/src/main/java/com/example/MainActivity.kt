@@ -1802,6 +1802,9 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val trendingAlbums by viewModel.trendingAlbums.collectAsState()
     val newReleases by viewModel.newReleases.collectAsState()
     val bollywoodHits by viewModel.bollywoodHits.collectAsState()
+    val globalOrLocalHits by viewModel.globalOrLocalHits.collectAsState()
+    val moodTracks by viewModel.moodTracks.collectAsState()
+    val partyTracks by viewModel.partyTracks.collectAsState()
     val isLoading by viewModel.isExploreLoading.collectAsState()
     
     val pageScrollState = rememberScrollState()
@@ -1809,11 +1812,14 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val albumsRowState = rememberLazyListState()
     val releasesRowState = rememberLazyListState()
     val bollywoodRowState = rememberLazyListState()
+    val globalLocalRowState = rememberLazyListState()
+    val moodRowState = rememberLazyListState()
+    val partyRowState = rememberLazyListState()
 
     val top10RowState = rememberLazyListState()
     val top10Hits = trendingSongs.take(10)
 
-    val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits
+    val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits + globalOrLocalHits + moodTracks + partyTracks
 
     LaunchedEffect(focusedIndex) {
         if (flatList.isEmpty()) return@LaunchedEffect
@@ -1829,9 +1835,18 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size) {
             val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size
             releasesRowState.animateScrollToItem(maxOf(0, idx))
-        } else if (focusedIndex < flatList.size) {
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size) {
             val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size
             bollywoodRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size
+            globalLocalRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size
+            moodRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < flatList.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size
+            partyRowState.animateScrollToItem(maxOf(0, idx))
         }
     }
 
@@ -1979,6 +1994,64 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 itemsIndexed(bollywoodHits.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (globalOrLocalHits.isNotEmpty()) {
+            val title = if (exploreRegion == MusicPlayerViewModel.ExploreRegion.INDIA) "Global Hits" else "Local Indian Hits"
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection(title, globalOrLocalHits) })
+            }
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size
+            LazyRow(
+                state = globalLocalRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(globalOrLocalHits.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (moodTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Mood & Chill", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Mood & Chill", moodTracks) })
+            }
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size
+            LazyRow(
+                state = moodRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(moodTracks.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (partyTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Party & Dance Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Party & Dance Hits", partyTracks) })
+            }
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size
+            LazyRow(
+                state = partyRowState,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(partyTracks.take(15)) { index, track ->
                     val isFocused = (index + offset) == focusedIndex
                     SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
                 }
