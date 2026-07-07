@@ -180,6 +180,23 @@ fun iPodPlayerApp(
     val context = LocalContext.current
     val viewModel: MusicPlayerViewModel = viewModel()
     
+    // Greeting state
+    var showGreeting by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(3000)
+        showGreeting = false
+    }
+    
+    val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val greetingText = when (currentHour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..20 -> "Good evening"
+        else -> "Good night"
+    }
+    val userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
+    val fullGreeting = "$greetingText, $userName."
+    
     // Dialog states
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var playlistToAddTo by remember { mutableStateOf<Track?>(null) }
@@ -265,6 +282,30 @@ fun iPodPlayerApp(
         modifier = Modifier.fillMaxSize()
     ) {
         ChatRoomFullScreenOverlay(viewModel = viewModel)
+    }
+
+    AnimatedVisibility(
+        visible = showGreeting,
+        enter = androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(800)),
+        exit = androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(800)),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.75f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = fullGreeting,
+                color = Color.White,
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.SansSerif,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(32.dp)
+            )
+        }
     }
 
     if (showCreatePlaylistDialog) {
