@@ -2801,7 +2801,6 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF121212))
     ) {
         // Spotify-inspired Header
         Box(
