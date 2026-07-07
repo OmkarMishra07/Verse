@@ -21,6 +21,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ScreenType(val title: String) {
@@ -919,13 +920,21 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    private val playlistMutex = kotlinx.coroutines.sync.Mutex()
+
     fun addTrackToPlaylist(track: Track, playlistId: Long) {
         viewModelScope.launch {
-            val maxOrder = songDao.getMaxOrderForPlaylist(playlistId) ?: 0
-            val song = track.toPlaylistSong(playlistId, maxOrder + 1)
-            songDao.insertPlaylistSong(song)
-            currentUserId?.let { uid ->
-                com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, song)
+            playlistMutex.withLock {
+                val existingSongs = songDao.getSongsForPlaylist(playlistId).first()
+                if (existingSongs.any { it.videoId == track.id }) {
+                    return@launch
+                }
+                val maxOrder = songDao.getMaxOrderForPlaylist(playlistId) ?: 0
+                val song = track.toPlaylistSong(playlistId, maxOrder + 1)
+                songDao.insertPlaylistSong(song)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, song)
+                }
             }
         }
     }
