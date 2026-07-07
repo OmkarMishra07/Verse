@@ -123,6 +123,9 @@ fun ClickWheel(
                                 viewModel.onWheelRotated(clockwise)
                                 triggerHapticClick()
                                 lastAngle = currentAngle
+                                if (viewModel.tutorialState.value == 1) {
+                                    viewModel.setTutorialState(2)
+                                }
                             }
                         } ?: run {
                             lastAngle = currentAngle
@@ -322,6 +325,9 @@ fun ClickWheel(
                                     val targetScreen = viewModel.quickAccessScreens[viewModel.quickAccessSelection.value]
                                     viewModel.setScreen(targetScreen)
                                     viewModel.toggleQuickAccess(false)
+                                    if (viewModel.tutorialState.value == 2) {
+                                        viewModel.setTutorialState(3)
+                                    }
                                 } else {
                                     triggerHapticClick()
                                     onCenterClick()

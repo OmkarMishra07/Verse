@@ -13,8 +13,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,16 +63,62 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
     
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
-    Surface(
-        modifier = Modifier.fillMaxSize().imePadding(),
-        color = Color(0xFF0D0D0D) // Very dark, modern background
+    Box(
+        modifier = Modifier.fillMaxSize().imePadding().background(Color.Black)
     ) {
+        // Translucent background theme
+        AnimatedContent(
+            targetState = currentTrack?.thumbnailUrl,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(500)) togetherWith fadeOut(animationSpec = tween(500))
+            },
+            label = "GlowBackgroundTransition"
+        ) { imageUrl ->
+            if (imageUrl != null) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(36.dp)
+                        .graphicsLayer(alpha = 0.35f)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF007AFF).copy(alpha = 0.35f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.03f),
+                            Color.Black.copy(alpha = 0.4f)
+                        )
+                    )
+                )
+        )
+
         Column(modifier = Modifier.fillMaxSize()) {
             // 1. Header (Balanced)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF161616))
+                    .background(Color(0xFF161616).copy(alpha = 0.5f))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .windowInsetsPadding(WindowInsets.statusBars),
                 verticalAlignment = Alignment.CenterVertically
@@ -158,7 +209,7 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
                 }
             } else if (currentTrack != null) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().background(Color(0xFF161616)).padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF161616).copy(alpha = 0.5f)).padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(model = currentTrack!!.thumbnailUrl, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
@@ -330,7 +381,7 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF161616))
+                    .background(Color(0xFF161616).copy(alpha = 0.5f))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .windowInsetsPadding(WindowInsets.navigationBars),
                 verticalAlignment = Alignment.CenterVertically
