@@ -350,7 +350,7 @@ class VerseMusicService : MediaSessionService() {
         serviceJob.cancel()
         mediaSession?.release()
         versePlayer?.release()
-        WebViewHolder.destroy()
+        WebViewHolder.pause()
         super.onDestroy()
     }
 }

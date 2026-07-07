@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            com.example.WebViewHolder.init(context, musicViewModel)
                             iPodPlayerApp(
                                 currentUser = currentUser,
                                 onLogout = {
@@ -187,14 +189,8 @@ fun iPodPlayerApp(
         showGreeting = false
     }
     
-    val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val greetingText = when (currentHour) {
-        in 5..11 -> "Good morning"
-        in 12..16 -> "Good afternoon"
-        else -> "Good evening"
-    }
     val userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
-    val fullGreeting = "$greetingText, $userName."
+    val fullGreeting = "Welcome, $userName."
     
     // Dialog states
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
@@ -2920,13 +2916,18 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(
                             if (isFocused) Color.White.copy(alpha = 0.2f)
-                            else Color.Transparent
+                            else Color.White.copy(alpha = 0.05f)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isFocused) Color(0xFF00F2FE).copy(alpha = 0.5f) else Color.White.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(12.dp)
                         )
                         .clickable { viewModel.selectAndPlayTrack(track) }
-                        .padding(8.dp),
+                        .padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(

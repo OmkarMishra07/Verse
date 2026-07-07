@@ -157,6 +157,7 @@ fun YouTubeWebViewPlayer(
     // Load / switch video whenever the current track changes or a new play is triggered
     LaunchedEffect(track?.id, playTrigger) {
         val id = track?.id ?: return@LaunchedEffect
+        com.example.WebViewHolder.init(context, viewModel) // Ensure it's initialized before trying to play
         val startSecs = (viewModel.currentPositionMs.value / 1000).toInt()
         com.example.WebViewHolder.loadVideo(id, startSecs, viewModel.isPlaying.value)
     }

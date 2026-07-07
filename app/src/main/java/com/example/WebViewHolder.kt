@@ -41,7 +41,7 @@ object WebViewHolder {
         if (isInitialized) return
         isInitialized = true
 
-        webView = object : WebView(serviceContext) {
+        webView = object : WebView(serviceContext.applicationContext) {
             override fun onWindowVisibilityChanged(visibility: Int) {
                 // Always tell Chromium the view is visible so JS/media is never throttled
                 super.onWindowVisibilityChanged(android.view.View.VISIBLE)
