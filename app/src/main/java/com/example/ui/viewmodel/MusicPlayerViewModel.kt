@@ -28,6 +28,7 @@ enum class ScreenType(val title: String) {
     EXPLORE("Explore"),
     LIKED("Liked"),
     PLAYLISTS("Playlists"),
+    LIBRARY("Library"),
     NOW_PLAYING("Now Playing"),
     QUEUE("Queue"),
     SEARCH("Search"),
@@ -100,8 +101,23 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _isExpanded = MutableStateFlow(true)
     val isExpanded = _isExpanded.asStateFlow()
 
+    private val _isModernMode = MutableStateFlow(false)
+    val isModernMode = _isModernMode.asStateFlow()
+    fun setModernMode(modern: Boolean) {
+        _isModernMode.value = modern
+        getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("is_modern_mode", modern).apply()
+    }
+
     private val _currentScreen = MutableStateFlow(ScreenType.EXPLORE)
-    val currentScreen = _currentScreen.asStateFlow()
+    val currentScreen: StateFlow<ScreenType> = _currentScreen.asStateFlow()
+
+    private val _libraryTab = MutableStateFlow(0) // 0 = Liked, 1 = Playlists
+    val libraryTab: StateFlow<Int> = _libraryTab.asStateFlow()
+
+    fun setLibraryTab(tabIndex: Int) {
+        _libraryTab.value = tabIndex
+        _focusedIndex.value = 0 // Reset focus when switching tabs
+    }
 
     private val _showQuickAccess = MutableStateFlow(false)
     val showQuickAccess = _showQuickAccess.asStateFlow()
@@ -453,16 +469,21 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             songDao.removeDuplicatePlaylistSongs()
         }
 
-        val prefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
-        val tutorialCompleted = application.getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE).getBoolean("tutorial_completed_v2", false)
-        if (!tutorialCompleted) {
+        val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE)
+        val completed = prefs.getBoolean("tutorial_completed_v2", false)
+        if (!completed) {
             _tutorialState.value = 1
         } else {
             _tutorialState.value = 5
         }
+        val modern = prefs.getBoolean("is_modern_mode", false)
+        _isModernMode.value = modern
 
+        fetchExploreContent()
+
+        val musicPrefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
         if (savedTrack == null) {
-            val lastTrackId = prefs.getString("last_track_id", null)
+            val lastTrackId = musicPrefs.getString("last_track_id", null)
             if (lastTrackId != null) {
                 savedTrack = Track(
                     id = lastTrackId,
@@ -1071,18 +1092,30 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         // Tag every crash with a stable anonymous ID for clustering by account
         FirebaseCrashlytics.getInstance().setUserId(uid)
         viewModelScope.launch {
-            // First time login on this device? We merge/pull from Firestore.
-            val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
-            firestoreLiked.forEach { songDao.insertLikedSong(it) }
-
-            val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
-            firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
-
-            val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
-            firestorePlaylists.forEach { (playlist, songs) ->
-                songDao.insertPlaylist(playlist)
-                songDao.deleteSongsForPlaylist(playlist.id) // explicitly wipe local songs before sync
-                songs.forEach { songDao.insertPlaylistSong(it) }
+            val prefs = getApplication<android.app.Application>().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+            val lastSync = prefs.getLong("last_firestore_sync_$uid", 0L)
+            val now = System.currentTimeMillis()
+            
+            // Limit full remote sync to once every 24 hours to aggressively save Firestore READ quotas.
+            // Local Room DB will serve as the primary source of truth in the meantime.
+            if (now - lastSync > 24 * 60 * 60 * 1000L) {
+                val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
+                firestoreLiked.forEach { songDao.insertLikedSong(it) }
+    
+                val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
+                firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
+    
+                val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
+                firestorePlaylists.forEach { (playlist, songs) ->
+                    songDao.insertPlaylist(playlist)
+                    songDao.deleteSongsForPlaylist(playlist.id) // explicitly wipe local songs before sync
+                    songs.forEach { songDao.insertPlaylistSong(it) }
+                }
+                
+                prefs.edit().putLong("last_firestore_sync_$uid", now).apply()
+                android.util.Log.d("MusicPlayerViewModel", "Performed full 24h Firestore sync for user $uid")
+            } else {
+                android.util.Log.d("MusicPlayerViewModel", "Skipped Firestore sync (already synced in the last 24h)")
             }
         }
     }
@@ -1170,6 +1203,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun getActiveListSize(): Int {
         return when (_currentScreen.value) {
             ScreenType.EXPLORE -> _trendingSongs.value.take(10).size + _trendingSongs.value.size + _trendingAlbums.value.size + _newReleases.value.size + _bollywoodHits.value.size
+            ScreenType.LIBRARY -> if (_libraryTab.value == 0) likedTracks.value.size else playlists.value.size + 1
             ScreenType.LIKED -> likedTracks.value.size
             ScreenType.PLAYLISTS -> playlists.value.size + 1 // +1 for "Create Playlist" row
             ScreenType.PLAYLIST_DETAIL -> selectedPlaylistSongs.value.size
@@ -1184,6 +1218,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun executeFocusedItemAction() {
         val index = _focusedIndex.value
         when (_currentScreen.value) {
+            ScreenType.LIBRARY -> {
+                if (_libraryTab.value == 0) {
+                    val list = likedTracks.value
+                    if (index in list.indices) {
+                        selectAndPlayTrack(list[index], list)
+                    }
+                } else {
+                    val list = playlists.value
+                    if (index == 0) {
+                        // Trigger creation dialog (handled in UI via state, but we can't easily trigger the callback here. 
+                        // Wait, creating playlist via click wheel was already a limitation. We can leave it as a no-op or we need to pass a callback.)
+                    } else {
+                        val playlistIdx = index - 1
+                        if (playlistIdx in list.indices) {
+                            selectPlaylist(list[playlistIdx])
+                        }
+                    }
+                }
+            }
             ScreenType.EXPLORE -> {
                 val flatList = _trendingSongs.value.take(10) + _trendingSongs.value + _trendingAlbums.value + _newReleases.value + _bollywoodHits.value
                 if (index in flatList.indices) {

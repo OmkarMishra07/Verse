@@ -155,24 +155,11 @@ object FirestoreService {
                 "playedAt"     to com.google.firebase.Timestamp(entry.playedAt / 1000, 0)
             )
             historyCol(userId).document(entry.videoId).set(data).await()
-            pruneHistory(userId)
+            // Removed pruneHistory(userId) here because fetching the entire history
+            // on every track change causes exponential Firestore READ quota consumption.
+            // Client already limits fetchHistory to MAX_HISTORY.
         } catch (e: Exception) {
             Log.e(TAG, "upsertHistory failed: ${e.message}")
-            FirebaseCrashlytics.getInstance().recordException(e)
-        }
-    }
-
-    /** Keep only the most recent MAX_HISTORY entries. */
-    private suspend fun pruneHistory(userId: String) {
-        try {
-            val all = historyCol(userId)
-                .orderBy("playedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                .get().await().documents
-            if (all.size > MAX_HISTORY) {
-                all.drop(MAX_HISTORY).forEach { it.reference.delete() }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "pruneHistory failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
         }
     }

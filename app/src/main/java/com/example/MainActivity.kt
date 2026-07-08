@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -410,22 +411,25 @@ fun iPodDeviceFrame(
     val displayWeight = 1.2f
     val wheelSpacing = 12.dp
 
-    var isFullScreen by remember { mutableStateOf(false) }
     val currentScreen by viewModel.currentScreen.collectAsState()
     val isChatOpen by viewModel.isChatOpen.collectAsState()
+    val isModernMode by viewModel.isModernMode.collectAsState()
 
-    val showWheel = !isFullScreen && !(currentScreen == ScreenType.JAMMING && isChatOpen)
+    val showWheel = !isModernMode && !(currentScreen == ScreenType.JAMMING && isChatOpen)
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.linearGradient(
+                    if (isModernMode) androidx.compose.ui.graphics.SolidColor(Color.Black) else Brush.linearGradient(
                         colors = listOf(iPodChassis, iPodChassisDark)
                     )
                 )
-                .padding(horizontal = 14.dp, vertical = 20.dp),
+                .padding(
+                    horizontal = if (isModernMode) 0.dp else 14.dp,
+                    vertical = if (isModernMode) 0.dp else 20.dp
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -436,7 +440,6 @@ fun iPodDeviceFrame(
                 showCreatePlaylistDialog = showCreatePlaylistDialog,
                 onAddTrackToPlaylist = onAddTrackToPlaylist,
                 onShowLyrics = onShowLyrics,
-                onDisplayClick = { isFullScreen = !isFullScreen },
                 currentUser = currentUser,
                 onLogout = onLogout
             )
@@ -472,9 +475,19 @@ fun iPodDeviceFrame(
                                 }
                             },
                             onPrevClick = {
-                                viewModel.playPrevious()
+                                if (viewModel.currentScreen.value == ScreenType.LIBRARY) {
+                                    viewModel.setLibraryTab(0)
+                                } else {
+                                    viewModel.playPrevious()
+                                }
                             },
-                            onNextClick = { viewModel.playNext() },
+                            onNextClick = { 
+                                if (viewModel.currentScreen.value == ScreenType.LIBRARY) {
+                                    viewModel.setLibraryTab(1)
+                                } else {
+                                    viewModel.playNext()
+                                }
+                            },
                             onPlayPauseClick = { viewModel.togglePlayback() },
                             onCenterClick = { viewModel.onCenterPressed() }
                         )
@@ -516,6 +529,86 @@ fun iPodDeviceFrame(
                 }
             }
         }
+        if (isModernMode) {
+            GlassBottomNavBar(
+                viewModel = viewModel,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun GlassBottomNavBar(
+    viewModel: MusicPlayerViewModel,
+    modifier: Modifier = Modifier
+) {
+    val currentScreen by viewModel.currentScreen.collectAsState()
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(32.dp))
+            .background(Color(0xB3000000)) // 70% black for frosted glass look
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+            .padding(vertical = 12.dp, horizontal = 20.dp), // reduced padding to fit 5 items
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        NavBarIcon(
+            icon = Icons.Default.Home,
+            label = "Explore",
+            isSelected = currentScreen == ScreenType.EXPLORE || currentScreen == ScreenType.EXPLORE_SECTION,
+            onClick = { viewModel.setScreen(ScreenType.EXPLORE) }
+        )
+        NavBarIcon(
+            icon = Icons.Default.Search,
+            label = "Search",
+            isSelected = currentScreen == ScreenType.SEARCH,
+            onClick = { viewModel.setScreen(ScreenType.SEARCH) }
+        )
+        NavBarIcon(
+            icon = Icons.Default.PlayArrow,
+            label = "Player",
+            isSelected = currentScreen == ScreenType.NOW_PLAYING || currentScreen == ScreenType.QUEUE,
+            onClick = { viewModel.setScreen(ScreenType.NOW_PLAYING) }
+        )
+        NavBarIcon(
+            icon = Icons.Default.Favorite,
+            label = "Library",
+            isSelected = currentScreen == ScreenType.LIBRARY || currentScreen == ScreenType.PLAYLIST_DETAIL,
+            onClick = { viewModel.setScreen(ScreenType.LIBRARY) }
+        )
+        NavBarIcon(
+            icon = Icons.Default.Person, // Jam icon
+            label = "Jam",
+            isSelected = currentScreen == ScreenType.JAMMING,
+            onClick = { viewModel.setScreen(ScreenType.JAMMING) }
+        )
+    }
+}
+
+@Composable
+fun NavBarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, isSelected: Boolean, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = if (isSelected) iPodAccentBlue else Color.Gray,
+            modifier = Modifier.size(26.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            color = if (isSelected) iPodAccentBlue else Color.Gray,
+            fontSize = 11.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+        )
     }
 }
 
@@ -528,7 +621,6 @@ fun iPodScreenDisplay(
     showCreatePlaylistDialog: () -> Unit,
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
-    onDisplayClick: () -> Unit,
     currentUser: com.google.firebase.auth.FirebaseUser?,
     onLogout: () -> Unit
 ) {
@@ -537,16 +629,15 @@ fun iPodScreenDisplay(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val isModernMode by viewModel.isModernMode.collectAsState()
 
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 7 })
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 5 })
     
     val pageToScreen = listOf(
         ScreenType.EXPLORE,
-        ScreenType.LIKED,
-        ScreenType.PLAYLISTS,
         ScreenType.SEARCH,
-        ScreenType.QUEUE,
         ScreenType.NOW_PLAYING,
+        ScreenType.LIBRARY,
         ScreenType.JAMMING
     )
 
@@ -576,15 +667,9 @@ fun iPodScreenDisplay(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(28.dp), clip = true)
-            .clip(RoundedCornerShape(28.dp))
-            .background(iPodDisplayBg)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                onDisplayClick()
-            }
+            .shadow(if (isModernMode) 0.dp else 4.dp, RoundedCornerShape(if (isModernMode) 0.dp else 28.dp), clip = true)
+            .clip(RoundedCornerShape(if (isModernMode) 0.dp else 28.dp))
+            .background(if (isModernMode) Color.Black else iPodDisplayBg)
     ) {
         AnimatedContent(
             targetState = currentTrack?.thumbnailUrl,
@@ -633,7 +718,7 @@ fun iPodScreenDisplay(
         )
 
         Column(modifier = Modifier.fillMaxSize()) {
-            iPodStatusBar(currentTrack, currentUser, onLogout)
+            iPodStatusBar(viewModel, currentTrack, currentUser, onLogout)
 
             Box(modifier = Modifier.size(1.dp).alpha(0f)) {
                 YouTubeWebViewPlayer(
@@ -647,7 +732,7 @@ fun iPodScreenDisplay(
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                val isOverlayScreen = currentScreen == ScreenType.PLAYLIST_DETAIL || currentScreen == ScreenType.EXPLORE_SECTION
+                val isOverlayScreen = currentScreen == ScreenType.PLAYLIST_DETAIL || currentScreen == ScreenType.EXPLORE_SECTION || currentScreen == ScreenType.QUEUE
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
@@ -671,17 +756,15 @@ fun iPodScreenDisplay(
                     ) {
                         when (pageToScreen[pageIndex]) {
                             ScreenType.EXPLORE -> ExploreScreen(viewModel = viewModel)
-                            ScreenType.LIKED -> LikedScreen(viewModel = viewModel)
-                            ScreenType.PLAYLISTS -> PlaylistsScreen(
-                                viewModel = viewModel,
-                                onCreatePlaylistClick = showCreatePlaylistDialog
-                            )
                             ScreenType.SEARCH -> SearchScreen(viewModel = viewModel)
-                            ScreenType.QUEUE -> QueueScreen(viewModel = viewModel)
                             ScreenType.NOW_PLAYING -> NowPlayingScreen(
                                 viewModel = viewModel,
                                 onAddTrackToPlaylist = onAddTrackToPlaylist,
                                 onShowLyrics = onShowLyrics
+                            )
+                            ScreenType.LIBRARY -> LibraryScreen(
+                                viewModel = viewModel,
+                                onCreatePlaylistClick = showCreatePlaylistDialog
                             )
                             ScreenType.JAMMING -> JammingScreen(
                                 viewModel = viewModel,
@@ -699,6 +782,9 @@ fun iPodScreenDisplay(
                 if (currentScreen == ScreenType.EXPLORE_SECTION) {
                     ExploreSectionScreen(viewModel = viewModel)
                 }
+                if (currentScreen == ScreenType.QUEUE) {
+                    QueueScreen(viewModel = viewModel)
+                }
             }
 
             AnimatedVisibility(
@@ -708,17 +794,32 @@ fun iPodScreenDisplay(
             ) {
                 MiniYouTubePlayerBar(viewModel = viewModel)
             }
+            
+            val isModernMode by viewModel.isModernMode.collectAsState()
+            if (isModernMode) {
+                Spacer(modifier = Modifier.height(90.dp))
+            }
         }
     }
 }
 
 @Composable
 fun iPodStatusBar(
+    viewModel: MusicPlayerViewModel,
     currentTrack: Track?,
     currentUser: com.google.firebase.auth.FirebaseUser?,
     onLogout: () -> Unit
 ) {
     var showProfileDialog by remember { mutableStateOf(false) }
+    val isModernMode by viewModel.isModernMode.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val appVersion = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        } catch (e: Exception) {
+            "Unknown"
+        }
+    }
 
     Row(
         modifier = Modifier
@@ -779,31 +880,160 @@ fun iPodStatusBar(
     }
 
     if (showProfileDialog && currentUser != null) {
-        androidx.compose.material3.AlertDialog(
+        androidx.compose.ui.window.Dialog(
             onDismissRequest = { showProfileDialog = false },
-            title = { Text(text = "User Profile", color = Color.White) },
-            text = {
-                Column {
-                    Text(text = "Name: ${currentUser.displayName ?: "N/A"}", color = Color.White)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "Email: ${currentUser.email ?: "N/A"}", color = Color.White)
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xD9000000)) // Translucent black background
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 48.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { showProfileDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(32.dp))
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                    
+                    // Profile Section
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val photoUrl = currentUser.photoUrl
+                        val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } ?: currentUser.email ?: "User"
+                        if (photoUrl != null) {
+                            coil.compose.AsyncImage(
+                                model = photoUrl,
+                                contentDescription = "Profile Picture",
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(iPodAccentBlue),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = name.first().uppercase(),
+                                    color = Color.White,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.width(20.dp))
+                        
+                        Column {
+                            Text(text = name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                            Text(text = currentUser.email ?: "", color = Color.Gray, fontSize = 14.sp)
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(40.dp))
+                    
+                    // Settings Options
+                    SettingsItemRow(icon = Icons.Default.Person, title = "Account Details", subtitle = "Manage your account")
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(vertical = 12.dp, horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.width(20.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Modern UI Mode", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                            Text(if (isModernMode) "Full screen with Bottom Nav" else "Classic iPod Wheel", color = Color.Gray, fontSize = 13.sp)
+                        }
+                        androidx.compose.material3.Switch(
+                            checked = isModernMode,
+                            onCheckedChange = { viewModel.setModernMode(it) },
+                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = iPodAccentBlue,
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = Color.DarkGray
+                            )
+                        )
+                    }
+
+                    SettingsItemRow(icon = Icons.Default.Info, title = "About Verse", subtitle = "Version $appVersion")
+                    
+                    Spacer(modifier = Modifier.weight(1f))
+                    
+                    SettingsItemRow(
+                        icon = Icons.Default.ExitToApp,
+                        title = "Log Out",
+                        subtitle = "Sign out of this device",
+                        isDestructive = true,
+                        onClick = {
+                            showProfileDialog = false
+                            onLogout()
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { 
-                    showProfileDialog = false
-                    onLogout()
-                }) {
-                    Text("Logout", color = Color.Red, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showProfileDialog = false }) {
-                    Text("Close", color = Color.Gray)
-                }
-            },
-            containerColor = Color.DarkGray
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsItemRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    isDestructive: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(vertical = 16.dp, horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (isDestructive) Color.Red else Color.White,
+            modifier = Modifier.size(28.dp)
         )
+        Spacer(modifier = Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = if (isDestructive) Color.Red else Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(text = subtitle, color = Color.Gray, fontSize = 13.sp)
+            }
+        }
     }
 }
 
@@ -1164,6 +1394,19 @@ fun NowPlayingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = { viewModel.setScreen(ScreenType.QUEUE) }) {
+                    Icon(
+                        imageVector = Icons.Default.QueueMusic,
+                        contentDescription = "Queue",
+                        tint = Color.White
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1727,7 +1970,6 @@ fun JammingScreen(
             } else {
                 Spacer(modifier = Modifier.weight(1f))
             }
-            
         } // End of main Column
             
         if (showJamSearch) {
@@ -2136,6 +2378,69 @@ fun SpotifyCard(track: Track, isFocused: Boolean, onClick: () -> Unit) {
 }
 
 // ==========================================
+// 3a. LIBRARY SCREEN (Tabs for Liked and Playlists)
+// ==========================================
+@Composable
+fun LibraryScreen(
+    viewModel: MusicPlayerViewModel,
+    onCreatePlaylistClick: () -> Unit
+) {
+    val selectedTab by viewModel.libraryTab.collectAsState()
+    val tabs = listOf("Liked Songs", "Playlists")
+    val pagerState = rememberPagerState(initialPage = selectedTab, pageCount = { 2 })
+
+    // Sync tab clicks to pager
+    LaunchedEffect(selectedTab) {
+        if (pagerState.currentPage != selectedTab) {
+            pagerState.animateScrollToPage(selectedTab)
+        }
+    }
+    
+    // Sync pager swipes to tab state
+    LaunchedEffect(pagerState.currentPage) {
+        if (selectedTab != pagerState.currentPage) {
+            viewModel.setLibraryTab(pagerState.currentPage)
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.material3.TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = Color.Transparent,
+            contentColor = iPodAccentBlue,
+            indicator = { tabPositions ->
+                androidx.compose.material3.TabRowDefaults.SecondaryIndicator(
+                    Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                    color = iPodAccentBlue
+                )
+            }
+        ) {
+            tabs.forEachIndexed { index, title ->
+                androidx.compose.material3.Tab(
+                    selected = selectedTab == index,
+                    onClick = { viewModel.setLibraryTab(index) },
+                    text = { 
+                        Text(
+                            text = title, 
+                            color = if (selectedTab == index) iPodAccentBlue else Color.Gray,
+                            fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                        ) 
+                    }
+                )
+            }
+        }
+
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().weight(1f)) { page ->
+            if (page == 0) {
+                LikedScreen(viewModel = viewModel)
+            } else {
+                PlaylistsScreen(viewModel = viewModel, onCreatePlaylistClick = onCreatePlaylistClick)
+            }
+        }
+    }
+}
+
+// ==========================================
 // 3. LIKED SONGS SCREEN
 // ==========================================
 @Composable
@@ -2245,6 +2550,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(likedTracks) { index, track ->
@@ -2346,27 +2652,10 @@ fun PlaylistsScreen(
         modifier = Modifier
             .fillMaxSize()
     ) {
-        // Unique Glassmorphic Header
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color.White.copy(alpha = 0.1f))
-                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp))
-                .padding(20.dp)
-        ) {
-            Text(
-                text = "Your Library",
-                color = Color.White,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-        }
-
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Row 0: Create Playlist Trigger
@@ -2619,6 +2908,7 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(songs) { index, track ->
@@ -2711,9 +3001,19 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
 
 
 
+    val currentScreen by viewModel.currentScreen.collectAsState()
+
     LaunchedEffect(focusedIndex) {
         if (focusedIndex in results.indices) {
             listState.animateScrollToItem(focusedIndex)
+        }
+    }
+
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == ScreenType.SEARCH) {
+            focusRequester.requestFocus()
+        } else {
+            focusManager.clearFocus()
         }
     }
 
@@ -2722,7 +3022,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Modern Search Header (Apple Music inspired)
+        // Modern Search Header (Apple Music / Spotify inspired)
         Text(
             text = "Search",
             color = Color.White,
@@ -2735,7 +3035,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
         OutlinedTextField(
             value = query,
             onValueChange = { viewModel.setSearchQuery(it) },
-            placeholder = { Text("Artists, songs, or podcasts", color = Color.White.copy(0.4f), fontSize = 16.sp) },
+            placeholder = { Text("What do you want to listen to?", color = Color.White.copy(0.4f), fontSize = 16.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White.copy(0.7f)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
@@ -2922,12 +3222,24 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
         modifier = Modifier
             .fillMaxSize()
     ) {
-        // Spotify-inspired Header
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 20.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(
+                onClick = { viewModel.setScreen(ScreenType.NOW_PLAYING) },
+                modifier = Modifier.size(36.dp).background(Color.Black.copy(alpha=0.3f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.padding(4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
             Text(
                 text = "Queue",
                 color = Color.White,
@@ -2939,6 +3251,7 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(queue) { index, track ->
