@@ -105,6 +105,16 @@ interface SongDao {
     @Query("DELETE FROM recently_played")
     suspend fun clearRecentlyPlayed()
 
+    @Query("""
+        DELETE FROM playlist_songs 
+        WHERE id NOT IN (
+            SELECT MIN(id) 
+            FROM playlist_songs 
+            GROUP BY playlistId, videoId
+        )
+    """)
+    suspend fun removeDuplicatePlaylistSongs()
+
     @Transaction
     suspend fun clearAllData() {
         clearLikedSongs()

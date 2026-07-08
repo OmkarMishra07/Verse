@@ -447,6 +447,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     init {
         instance = this
+        
+        // Clean up any potential duplicates in the local database immediately on startup
+        viewModelScope.launch {
+            songDao.removeDuplicatePlaylistSongs()
+        }
 
         val prefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
         val tutorialCompleted = application.getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE).getBoolean("tutorial_completed", false)
@@ -484,7 +489,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         // Restore state if saved, otherwise use defaults
         _currentTrack.value = savedTrack   // null if nothing was ever played
-        _isPlaying.value = savedIsPlaying
+        _isPlaying.value = false // Always start paused on fresh launch
         _currentPositionMs.value = savedPositionMs
         _durationMs.value = savedDurationMs
         _queue.value = savedQueue ?: emptyList()
@@ -660,11 +665,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
             _isLoading.value = false
             _currentPositionMs.value = 0L
+            lastSeekTargetMs = 0L // Lock time updates until new video starts
+            lastSeekTime = System.currentTimeMillis()
             _currentTrack.value = resolved
             _isPlaying.value = true
             lastTrackChangeTime = System.currentTimeMillis()
             _playTrigger.value += 1
-            lastSeekTime = System.currentTimeMillis()
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
             pushJammingState()
             
@@ -1075,6 +1081,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
             firestorePlaylists.forEach { (playlist, songs) ->
                 songDao.insertPlaylist(playlist)
+                songDao.deleteSongsForPlaylist(playlist.id) // explicitly wipe local songs before sync
                 songs.forEach { songDao.insertPlaylistSong(it) }
             }
         }

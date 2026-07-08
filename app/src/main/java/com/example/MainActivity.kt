@@ -584,6 +584,12 @@ fun iPodScreenDisplay(
         }
     }
 
+    // Force user to land on EXPLORE page on fresh composition (app launch/restart)
+    LaunchedEffect(Unit) {
+        viewModel.setScreen(ScreenType.EXPLORE)
+        pagerState.scrollToPage(0)
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()

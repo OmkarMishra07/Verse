@@ -27,7 +27,7 @@ object UpdateHelper {
                 val responseData = response.body?.string() ?: return@withContext null
                 val json = JSONObject(responseData)
                 
-                val tagName = json.getString("tag_name").replace("v", "")
+                val tagName = json.getString("tag_name").replace("verse-v", "").replace("v", "")
                 val htmlUrl = json.getString("html_url")
                 
                 val isUpdateAvailable = isVersionGreater(tagName, currentVersion)
