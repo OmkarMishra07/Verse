@@ -19,7 +19,17 @@ data class YouTubeVideo(
 
 object YouTubeSearchHelper {
     private const val TAG = "YouTubeSearchHelper"
-    private val client = OkHttpClient.Builder().build()
+    private val client = OkHttpClient.Builder()
+        .cookieJar(object : okhttp3.CookieJar {
+            private val cookieStore = java.util.concurrent.ConcurrentHashMap<String, List<okhttp3.Cookie>>()
+            override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {
+                cookieStore[url.host] = cookies
+            }
+            override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
+                return cookieStore[url.host] ?: emptyList()
+            }
+        })
+        .build()
 
     suspend fun search(query: String): List<YouTubeVideo> = withContext(Dispatchers.IO) {
         val results = mutableListOf<YouTubeVideo>()
