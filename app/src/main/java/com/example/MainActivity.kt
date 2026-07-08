@@ -718,10 +718,12 @@ fun iPodStatusBar(
     currentUser: com.google.firebase.auth.FirebaseUser?,
     onLogout: () -> Unit
 ) {
+    var showProfileDialog by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(26.dp)
+            .height(36.dp)
             .background(Color.Black.copy(alpha = 0.2f))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -730,36 +732,36 @@ fun iPodStatusBar(
         Text(
             text = "Verse",
             color = Color.White.copy(alpha = 0.9f),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
         )
         
         Spacer(modifier = Modifier.weight(1f))
         
         if (currentUser != null) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.clickable { onLogout() }
+            val photoUrl = currentUser.photoUrl
+            val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } 
+                ?: currentUser.email 
+                ?: "U"
+            
+            Box(
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .clickable { showProfileDialog = true }
             ) {
-                val photoUrl = currentUser.photoUrl
-                val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } 
-                    ?: currentUser.email 
-                    ?: "U"
-                
                 if (photoUrl != null) {
                     coil.compose.AsyncImage(
                         model = photoUrl,
                         contentDescription = "Profile",
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(26.dp)
                             .clip(androidx.compose.foundation.shape.CircleShape),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(26.dp)
                             .clip(androidx.compose.foundation.shape.CircleShape)
                             .background(Color.DarkGray),
                         contentAlignment = Alignment.Center
@@ -767,20 +769,41 @@ fun iPodStatusBar(
                         Text(
                             text = name.first().uppercase(),
                             color = Color.White,
-                            fontSize = 9.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-                
-                Text(
-                    text = "Logout",
-                    color = iPodAccentBlue,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
+    }
+
+    if (showProfileDialog && currentUser != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showProfileDialog = false },
+            title = { Text(text = "User Profile", color = Color.White) },
+            text = {
+                Column {
+                    Text(text = "Name: ${currentUser.displayName ?: "N/A"}", color = Color.White)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = "Email: ${currentUser.email ?: "N/A"}", color = Color.White)
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { 
+                    showProfileDialog = false
+                    onLogout()
+                }) {
+                    Text("Logout", color = Color.Red, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showProfileDialog = false }) {
+                    Text("Close", color = Color.Gray)
+                }
+            },
+            containerColor = Color.DarkGray
+        )
     }
 }
 
