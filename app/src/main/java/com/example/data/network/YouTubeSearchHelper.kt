@@ -34,8 +34,14 @@ object YouTubeSearchHelper {
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .build()
 
-            val response = client.newCall(request).execute()
-            val html = response.body?.string() ?: ""
+            var response = client.newCall(request).execute()
+            var html = response.body?.string() ?: ""
+            
+            // If YouTube served a consent page or challenge on the first try, retry once seamlessly.
+            if (!html.contains("\"videoRenderer\":")) {
+                response = client.newCall(request).execute()
+                html = response.body?.string() ?: ""
+            }
             
             // We split the HTML page by "videoRenderer" to isolate each search result block
             val parts = html.split("\"videoRenderer\":")

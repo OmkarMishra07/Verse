@@ -1198,6 +1198,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
+        if (query.isNotBlank()) {
+            _isSearchLoading.value = true
+        } else {
+            _isSearchLoading.value = false
+            _searchResults.value = emptyList()
+        }
     }
 
     private fun getActiveListSize(): Int {
