@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.data.local.Playlist
@@ -216,7 +217,9 @@ fun iPodPlayerApp(
     // Back navigation logic
     var backPressTime by remember { mutableLongStateOf(0L) }
     BackHandler {
-        if (currentScreen != ScreenType.EXPLORE) {
+        if (viewModel.isChatOpen.value) {
+            viewModel.setIsChatOpen(false)
+        } else if (currentScreen != ScreenType.EXPLORE) {
             viewModel.setScreen(ScreenType.EXPLORE)
         } else {
             val currentTime = System.currentTimeMillis()
@@ -454,6 +457,9 @@ fun iPodDeviceFrame(
                             viewModel = viewModel,
                             modifier = Modifier.padding(bottom = 8.dp),
                             onMenuClick = {
+                                if (viewModel.tutorialState.value == 4) {
+                                    viewModel.setTutorialState(5)
+                                }
                                 if (isExpanded) {
                                     if (viewModel.currentScreen.value == ScreenType.JAMMING) {
                                         viewModel.setScreen(ScreenType.NOW_PLAYING)
@@ -483,39 +489,11 @@ fun iPodDeviceFrame(
                 }
             }
     
-            AnimatedVisibility(
-                visible = isFullScreen,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                        .clickable { isFullScreen = false }
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.FullscreenExit,
-                        contentDescription = "Exit Fullscreen",
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        "Tap display or here to exit fullscreen",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 11.sp
-                    )
-                }
-            }
+            // Removed the ugly fullscreen popup overlay
         }
 
         val tutState by viewModel.tutorialState.collectAsState()
-        if (showWheel && tutState < 3) {
+        if (showWheel && tutState < 5) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -529,7 +507,9 @@ fun iPodDeviceFrame(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         if (tutState == 1) "Try rotating the wheel in a circular motion to scroll through items."
-                        else "Great! Now press and hold the center button to open the Quick Access Menu and change pages.",
+                        else if (tutState == 2) "Great! Now press and hold the center button to open the Quick Access Menu."
+                        else if (tutState == 3) "Awesome! You can also swipe left or right on the screen above the wheel to swap between pages."
+                        else "Finally, press the Menu button at the top of the wheel to enter a Jam Session!",
                         color = Color.White, textAlign = TextAlign.Center, fontSize = 15.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -581,6 +561,9 @@ fun iPodScreenDisplay(
         val targetScreen = pageToScreen[pagerState.settledPage]
         if (viewModel.currentScreen.value != targetScreen && targetScreen != ScreenType.PLAYLIST_DETAIL) {
             viewModel.setScreen(targetScreen)
+            if (viewModel.tutorialState.value == 3) {
+                viewModel.setTutorialState(4)
+            }
         }
     }
 
@@ -1040,53 +1023,47 @@ fun NowPlayingScreen(
         return
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-
         AnimatedVisibility(
             visible = showSearch,
             enter = expandVertically() + fadeIn(),
-            exit  = shrinkVertically() + fadeOut()
+            exit  = shrinkVertically() + fadeOut(),
+            modifier = Modifier.zIndex(1f).align(Alignment.TopCenter)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(16.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xB3000000))
+                    .padding(12.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = inlineQuery,
                     onValueChange = { inlineQuery = it },
                     placeholder = {
-                        Text("Search YouTube…", color = Color.White.copy(0.4f), fontSize = 12.sp)
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Filled.Search, null, tint = Color.White.copy(0.5f),
-                            modifier = Modifier.size(16.dp))
+                        Text("Search YouTube...", color = Color.Gray)
                     },
                     trailingIcon = {
                         IconButton(onClick = {
                             showSearch = false; inlineQuery = ""; inlineResults = emptyList()
                             focusManager.clearFocus()
                         }) {
-                            Icon(Icons.Filled.Close, null, tint = Color.White.copy(0.5f),
-                                modifier = Modifier.size(14.dp))
+                            Icon(Icons.Filled.Close, null, tint = Color.White)
                         }
                     },
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = iPodAccentBlue,
-                        unfocusedBorderColor = Color.White.copy(0.2f),
-                        focusedTextColor     = Color.White,
-                        unfocusedTextColor   = Color.White,
-                        cursorColor          = iPodAccentBlue,
-                        focusedContainerColor   = Color.White.copy(0.05f),
-                        unfocusedContainerColor = Color.White.copy(0.03f)
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                        focusedBorderColor = iPodAccentBlue, unfocusedBorderColor = Color.DarkGray
                     ),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 if (isSearching) {
@@ -1100,10 +1077,9 @@ fun NowPlayingScreen(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 180.dp)
-                            .background(Color(0xFF111111), RoundedCornerShape(8.dp))
+                            .heightIn(max = 280.dp)
                             .padding(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(inlineResults) { _, track ->
                             Row(
@@ -1133,15 +1109,15 @@ fun NowPlayingScreen(
                                     Text(
                                         text = track.title,
                                         color = Color.White,
-                                        fontSize = 11.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = track.artist,
-                                        color = Color.White.copy(0.55f),
-                                        fontSize = 9.sp,
+                                        color = Color.Gray,
+                                        fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -1156,13 +1132,19 @@ fun NowPlayingScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
+                }
             }
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
@@ -1405,6 +1387,30 @@ fun NowPlayingScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            val isPlaying by viewModel.isPlaying.collectAsState()
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { viewModel.playPrevious() }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(36.dp))
+                }
+                FloatingActionButton(
+                    onClick = { viewModel.togglePlayback() },
+                    containerColor = iPodAccentBlue,
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape
+                ) {
+                    Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(32.dp))
+                }
+                IconButton(onClick = { viewModel.playNext() }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(36.dp))
+                }
+            }
+        }
         }
     }
 }
@@ -1596,7 +1602,8 @@ fun JammingScreen(
             )
         }
 
-        Column(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("${roomState?.hostName ?: "Unknown"}'s Room", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -1615,87 +1622,11 @@ fun JammingScreen(
                             Box(modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(8.dp).clip(CircleShape).background(Color.Red))
                         }
                     }
-                    IconButton(onClick = { showShareDialog = true }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                    }
                     IconButton(onClick = { 
                         coroutineScope.launch { com.example.data.remote.JammingService.leaveRoom(jammingRoomId, myName) }
                         viewModel.setJammingRoomId("")
                     }) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red)
-                    }
-                }
-            }
-            
-            if (showJamSearch) {
-                var jamSearchQuery by remember { mutableStateOf("") }
-                var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
-                var isSearching by remember { mutableStateOf(false) }
-                val focusRequester = remember { FocusRequester() }
-                
-                LaunchedEffect(showJamSearch) {
-                    if (showJamSearch) {
-                        focusRequester.requestFocus()
-                    }
-                }
-                
-                val performSearch = {
-                    if (jamSearchQuery.isNotBlank()) {
-                        isSearching = true
-                        coroutineScope.launch {
-                            try {
-                                searchResults = com.example.data.network.YouTubeSearchHelper.search(jamSearchQuery).map { yt -> 
-                                    Track(id = yt.videoId, title = yt.title, artist = yt.artist, album = "YouTube", thumbnailUrl = yt.thumbnailUrl, duration = yt.duration) 
-                                }
-                            } finally {
-                                isSearching = false
-                            }
-                        }
-                    }
-                }
-                
-                Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(12.dp).heightIn(max = 250.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        androidx.compose.material3.OutlinedTextField(
-                            value = jamSearchQuery,
-                            onValueChange = { jamSearchQuery = it },
-                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                            placeholder = { Text("Search YouTube...", color = Color.Gray) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { performSearch() }),
-                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00C853), unfocusedBorderColor = Color.DarkGray
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(onClick = { performSearch() }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
-                        }
-                    }
-                    if (isSearching) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.CircularProgressIndicator(color = Color(0xFF00C853))
-                        }
-                    } else if (searchResults.isNotEmpty()) {
-                        LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
-                            items(searchResults.size) { idx ->
-                                val track = searchResults[idx]
-                                Row(modifier = Modifier.fillMaxWidth().clickable {
-                                    viewModel.selectAndPlayTrackNoRedirect(track)
-                                    showJamSearch = false
-                                }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(track.title, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(track.artist, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                }
-                            }
-                        }
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red, modifier = Modifier.size(32.dp))
                     }
                 }
             }
@@ -1717,21 +1648,31 @@ fun JammingScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.weight(1f))
-            
             if (currentTrack != null) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    coil.compose.AsyncImage(
-                        model = currentTrack?.thumbnailUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(220.dp).clip(RoundedCornerShape(12.dp))
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(currentTrack?.title ?: "", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                    Text(currentTrack?.artist ?: "", color = Color.Gray, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                Column(
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 8.dp), 
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        coil.compose.AsyncImage(
+                            model = currentTrack?.thumbnailUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .sizeIn(maxWidth = 260.dp, maxHeight = 260.dp)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                    }
                     
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(currentTrack?.title ?: "", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    Text(currentTrack?.artist ?: "", color = Color.Gray, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
                     
                     SeekBar(viewModel = viewModel)
                     Row(
@@ -1742,7 +1683,7 @@ fun JammingScreen(
                         Text(formatMs(durationMs), color = Color.Gray, fontSize = 11.sp)
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { viewModel.playPrevious() }, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(36.dp))
@@ -1750,46 +1691,110 @@ fun JammingScreen(
                         FloatingActionButton(
                             onClick = { viewModel.togglePlayback() },
                             containerColor = iPodAccentBlue,
-                            modifier = Modifier.size(72.dp),
+                            modifier = Modifier.size(64.dp),
                             shape = CircleShape
                         ) {
-                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(36.dp))
+                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(32.dp))
                         }
                         IconButton(onClick = { viewModel.playNext() }, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(36.dp))
                         }
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
             }
             
-            Spacer(modifier = Modifier.weight(1f))
+        } // End of main Column
             
-            if (chatMessages.isNotEmpty()) {
-                val lastMsg = chatMessages.last()
-                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).background(Color(0xFF2C2C2C), RoundedCornerShape(12.dp)).clickable { 
-                    viewModel.setIsChatOpen(true) 
-                    viewModel.setHasUnreadMessages(false)
-                }.padding(12.dp)) {
-                    Column {
-                        Text(if (lastMsg.isSystemMessage || lastMsg.senderName == "System") "System Action:" else "${lastMsg.senderName}:", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(lastMsg.message, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, fontStyle = if (lastMsg.isSystemMessage || lastMsg.senderName == "System") androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal)
+        if (showJamSearch) {
+            var jamSearchQuery by remember { mutableStateOf("") }
+            var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
+            var isSearching by remember { mutableStateOf(false) }
+            val focusRequester = remember { FocusRequester() }
+            
+            LaunchedEffect(showJamSearch) {
+                if (showJamSearch) {
+                    focusRequester.requestFocus()
+                }
+            }
+            
+            val performSearch = {
+                if (jamSearchQuery.isNotBlank()) {
+                    isSearching = true
+                    coroutineScope.launch {
+                        try {
+                            searchResults = com.example.data.network.YouTubeSearchHelper.search(jamSearchQuery).map { yt -> 
+                                Track(id = yt.videoId, title = yt.title, artist = yt.artist, album = "YouTube", thumbnailUrl = yt.thumbnailUrl, duration = yt.duration) 
+                            }
+                        } finally {
+                            isSearching = false
+                        }
                     }
                 }
             }
             
-            Button(
-                onClick = { 
-                    viewModel.setIsChatOpen(true) 
-                    viewModel.setHasUnreadMessages(false)
-                },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 64.dp)
+                    .padding(horizontal = 8.dp)
             ) {
-                Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(if (chatMessages.isEmpty()) "Open Room Chat" else "View All Chat")
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(16.dp, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xB3000000)) // Semi-transparent for glass effect
+                        .padding(12.dp)
+                        .heightIn(max = 400.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = jamSearchQuery,
+                            onValueChange = { jamSearchQuery = it },
+                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                            placeholder = { Text("Search YouTube...", color = Color.Gray) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { performSearch() }),
+                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                                focusedBorderColor = iPodAccentBlue, unfocusedBorderColor = Color.DarkGray
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(onClick = { performSearch() }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
+                        }
+                    }
+                    if (isSearching) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.CircularProgressIndicator(color = iPodAccentBlue)
+                        }
+                    } else if (searchResults.isNotEmpty()) {
+                        LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
+                            items(searchResults.size) { idx ->
+                                val track = searchResults[idx]
+                                Row(modifier = Modifier.fillMaxWidth().clickable {
+                                    viewModel.selectAndPlayTrackNoRedirect(track)
+                                    showJamSearch = false
+                                }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    coil.compose.AsyncImage(model = track.thumbnailUrl, contentDescription = null, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(track.title, color = Color.White, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(track.artist, color = Color.Gray, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    } // End of outer Box
     }
 }
 
@@ -2681,9 +2686,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
+
 
     LaunchedEffect(focusedIndex) {
         if (focusedIndex in results.indices) {

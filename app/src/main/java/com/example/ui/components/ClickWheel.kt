@@ -41,8 +41,14 @@ import androidx.compose.ui.unit.dp
 import com.example.ui.viewmodel.MusicPlayerViewModel
 import kotlin.math.abs
 import kotlin.math.atan2
+import android.content.Context
+import android.media.AudioManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.LocalIndication
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ClickWheel(
     viewModel: MusicPlayerViewModel,
@@ -55,8 +61,43 @@ fun ClickWheel(
 ) {
     val isPlaying by viewModel.isPlaying.collectAsState()
     val view = LocalView.current
+    val context = LocalContext.current
     var wheelSize by remember { mutableStateOf(IntSize.Zero) }
     val coroutineScope = rememberCoroutineScope()
+
+    val prevInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPrevPressed by prevInteractionSource.collectIsPressedAsState()
+    var prevWasLongPress by remember { mutableStateOf(false) }
+    LaunchedEffect(isPrevPressed) {
+        if (isPrevPressed) {
+            prevWasLongPress = false
+            kotlinx.coroutines.delay(500)
+            prevWasLongPress = true
+            while (isPrevPressed) {
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                val currentPos = viewModel.currentPositionMs.value
+                viewModel.seekTo(maxOf(0, currentPos - 5000))
+                kotlinx.coroutines.delay(500)
+            }
+        }
+    }
+
+    val nextInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isNextPressed by nextInteractionSource.collectIsPressedAsState()
+    var nextWasLongPress by remember { mutableStateOf(false) }
+    LaunchedEffect(isNextPressed) {
+        if (isNextPressed) {
+            nextWasLongPress = false
+            kotlinx.coroutines.delay(500)
+            nextWasLongPress = true
+            while (isNextPressed) {
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                val currentPos = viewModel.currentPositionMs.value
+                viewModel.seekTo(currentPos + 5000)
+                kotlinx.coroutines.delay(500)
+            }
+        }
+    }
 
     // Haptic feedback trigger helper
     val triggerHapticClick = {
@@ -120,7 +161,13 @@ fun ClickWheel(
                             val threshold = 15.0
                             if (abs(delta) >= threshold) {
                                 val clockwise = delta > 0
-                                viewModel.onWheelRotated(clockwise)
+                                if (viewModel.currentScreen.value == com.example.ui.viewmodel.ScreenType.NOW_PLAYING || viewModel.currentScreen.value == com.example.ui.viewmodel.ScreenType.JAMMING) {
+                                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                    val direction = if (clockwise) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+                                } else {
+                                    viewModel.onWheelRotated(clockwise)
+                                }
                                 triggerHapticClick()
                                 lastAngle = currentAngle
                                 if (viewModel.tutorialState.value == 1) {
@@ -178,12 +225,21 @@ fun ClickWheel(
                 .align(Alignment.CenterStart)
                 .padding(start = 16.dp)
         ) {
-            IconButton(
-                onClick = {
-                    triggerHapticClick()
-                    onPrevClick()
-                },
-                modifier = Modifier.size(48.dp)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = prevInteractionSource,
+                        indication = LocalIndication.current,
+                        onClick = {
+                            if (!prevWasLongPress) {
+                                triggerHapticClick()
+                                onPrevClick()
+                            }
+                        }
+                    )
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -205,12 +261,21 @@ fun ClickWheel(
                 .align(Alignment.CenterEnd)
                 .padding(end = 16.dp)
         ) {
-            IconButton(
-                onClick = {
-                    triggerHapticClick()
-                    onNextClick()
-                },
-                modifier = Modifier.size(48.dp)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = nextInteractionSource,
+                        indication = LocalIndication.current,
+                        onClick = {
+                            if (!nextWasLongPress) {
+                                triggerHapticClick()
+                                onNextClick()
+                            }
+                        }
+                    )
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

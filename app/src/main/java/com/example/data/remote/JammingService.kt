@@ -61,6 +61,7 @@ object JammingService {
     suspend fun joinRoom(roomId: String, participantName: String): Boolean {
         return try {
             roomsCol().document(roomId).update("participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName)).await()
+            sendMessage(roomId, "System", "$participantName joined the jam", isSystemMessage = true)
             true
         } catch (e: Exception) {
             Log.e(TAG, "joinRoom failed", e)
@@ -71,6 +72,7 @@ object JammingService {
     suspend fun leaveRoom(roomId: String, participantName: String): Boolean {
         return try {
             roomsCol().document(roomId).update("participants", com.google.firebase.firestore.FieldValue.arrayRemove(participantName)).await()
+            sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
             true
         } catch (e: Exception) {
             Log.e(TAG, "leaveRoom failed", e)
