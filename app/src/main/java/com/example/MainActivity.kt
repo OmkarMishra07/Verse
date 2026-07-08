@@ -506,26 +506,39 @@ fun iPodDeviceFrame(
         }
 
         val tutState by viewModel.tutorialState.collectAsState()
-        if (showWheel && tutState < 5) {
+        if (showWheel && tutState < 6) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 290.dp, start = 24.dp, end = 24.dp)
+                    .align(if (tutState == 5) Alignment.TopEnd else Alignment.BottomCenter)
+                    .padding(
+                        top = if (tutState == 5) 80.dp else 0.dp,
+                        bottom = if (tutState == 5) 0.dp else 290.dp,
+                        start = 24.dp,
+                        end = 24.dp
+                    )
                     .background(Color(0xE6000000), RoundedCornerShape(12.dp))
                     .border(2.dp, iPodAccentBlue, RoundedCornerShape(12.dp))
                     .padding(16.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Welcome to Verse!", color = iPodAccentBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Column(horizontalAlignment = if (tutState == 5) Alignment.End else Alignment.CenterHorizontally) {
+                    if (tutState == 5) {
+                        Text("↗️", fontSize = 28.sp, modifier = Modifier.padding(bottom = 8.dp, end = 8.dp))
+                    }
+                    Text(if (tutState == 5) "One more thing!" else "Welcome to Verse!", color = iPodAccentBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        if (tutState == 1) "Try rotating the wheel in a circular motion to scroll through items."
-                        else if (tutState == 2) "Great! Now press and hold the center button to open the Quick Access Menu."
-                        else if (tutState == 3) "Awesome! You can also swipe left or right on the screen above the wheel to swap between pages."
-                        else "Finally, press the Menu button at the top of the wheel to enter a Jam Session!",
-                        color = Color.White, textAlign = TextAlign.Center, fontSize = 15.sp,
+                        if (tutState == 1) "Try rotating the wheel in a circular motion to scroll through items. 🔄\n(Scroll now to continue)"
+                        else if (tutState == 2) "Great! Now press and hold the center button to open the Quick Access Menu. 🎯\n(Long-press now to continue)"
+                        else if (tutState == 3) "Awesome! You can also swipe left or right on the screen above the wheel to swap between pages. ↔️\n(Swipe now to continue)"
+                        else if (tutState == 4) "Press the Menu button at the top of the wheel to enter a Jam Session! 👆\n(Press Menu now to continue)"
+                        else "Prefer a modern look?\nTap your Profile picture at the top right to open Settings!",
+                        color = Color.White, textAlign = if (tutState == 5) TextAlign.End else TextAlign.Center, fontSize = 15.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    if (tutState < 5) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("👇", fontSize = 28.sp)
+                    }
                 }
             }
         }
@@ -812,6 +825,7 @@ fun iPodStatusBar(
 ) {
     var showProfileDialog by remember { mutableStateOf(false) }
     val isModernMode by viewModel.isModernMode.collectAsState()
+    val tutState by viewModel.tutorialState.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val appVersion = remember {
         try {
@@ -848,7 +862,10 @@ fun iPodStatusBar(
             Box(
                 modifier = Modifier
                     .clip(androidx.compose.foundation.shape.CircleShape)
-                    .clickable { showProfileDialog = true }
+                    .clickable { 
+                        showProfileDialog = true 
+                        if (tutState == 5) viewModel.setTutorialState(6)
+                    }
             ) {
                 if (photoUrl != null) {
                     coil.compose.AsyncImage(
@@ -969,7 +986,10 @@ fun iPodStatusBar(
                         }
                         androidx.compose.material3.Switch(
                             checked = isModernMode,
-                            onCheckedChange = { viewModel.setModernMode(it) },
+                            onCheckedChange = { 
+                                viewModel.setModernMode(it)
+                                if (tutState == 6) viewModel.setTutorialState(7)
+                            },
                             colors = androidx.compose.material3.SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
                                 checkedTrackColor = iPodAccentBlue,
@@ -977,6 +997,22 @@ fun iPodStatusBar(
                                 uncheckedTrackColor = Color.DarkGray
                             )
                         )
+                    }
+                    
+                    if (tutState == 6) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .background(Color(0xE6000000), RoundedCornerShape(12.dp))
+                                .border(2.dp, iPodAccentBlue, RoundedCornerShape(12.dp))
+                                .padding(16.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
+                                Text("⬆️", fontSize = 28.sp, modifier = Modifier.padding(bottom = 8.dp, end = 24.dp))
+                                Text("Turn this on to use the app in Full Screen mode! You can always switch back to Classic mode here.", color = Color.White, textAlign = TextAlign.End, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
                     }
 
                     SettingsItemRow(icon = Icons.Default.Info, title = "About Verse", subtitle = "Version $appVersion")

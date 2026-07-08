@@ -130,12 +130,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     val hasUnreadMessages = _hasUnreadMessages.asStateFlow()
     fun setHasUnreadMessages(unread: Boolean) { _hasUnreadMessages.value = unread }
 
-    private val _tutorialState = MutableStateFlow(5) // 0=none, 1=scroll, 2=long-press, 3=swipe, 4=jam-button, 5=done
+    private val _tutorialState = MutableStateFlow(7) // 0=none, 1=scroll, 2=long-press, 3=swipe, 4=jam-button, 5=modern-mode-icon, 6=modern-mode-toggle, 7=done
     val tutorialState = _tutorialState.asStateFlow()
     fun setTutorialState(state: Int) {
         _tutorialState.value = state
-        if (state == 5) {
-            getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("tutorial_completed_v2", true).apply()
+        if (state == 7) {
+            getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("tutorial_completed_v4", true).apply()
         }
     }
 
@@ -470,11 +470,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE)
-        val completed = prefs.getBoolean("tutorial_completed_v2", false)
+        val completed = prefs.getBoolean("tutorial_completed_v4", false)
         if (!completed) {
             _tutorialState.value = 1
         } else {
-            _tutorialState.value = 5
+            _tutorialState.value = 7
         }
         val modern = prefs.getBoolean("is_modern_mode", false)
         _isModernMode.value = modern
