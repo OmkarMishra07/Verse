@@ -12,8 +12,7 @@ With Verse, you can not only listen to your favorite local music, but also join 
 - **Modern UI/UX:** A stunning dark theme featuring translucent glassmorphic elements and smooth animations.
 - **Media Controls:** Full foreground service support for music playback, including lock screen and notification controls.
 
-## Screenshots
-*(om screenshot daal de bhai ismein)*
+
 
 ## How to Run Locally
 
