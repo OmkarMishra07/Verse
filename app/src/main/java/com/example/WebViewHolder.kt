@@ -201,7 +201,9 @@ object WebViewHolder {
 
       function onPlayerReady(event) {
         if (window.AndroidPlayerBridge) AndroidPlayerBridge.onPlayerReady();
-        event.target.playVideo();
+        if ($autoplay === 1) {
+            event.target.playVideo();
+        }
         setInterval(function() {
           try {
             if (player && typeof player.getCurrentTime === 'function' && typeof player.getDuration === 'function') {
