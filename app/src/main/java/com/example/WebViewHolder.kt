@@ -27,10 +27,15 @@ object WebViewHolder {
     @SuppressLint("StaticFieldLeak")
     private var webView: WebView? = null
     private var isInitialized = false
+    private var isPlayerReady = false
     private var hasLoadedFirstVideo = false
     private var lastLoadedVideoId: String? = null
     private var lastAutoplay: Boolean = true
     private var lastLoadTime: Long = 0L
+
+    fun setPlayerReady(ready: Boolean) {
+        isPlayerReady = ready
+    }
 
     /**
      * Initialize the WebView inside the foreground service context.
@@ -108,8 +113,9 @@ object WebViewHolder {
         lastLoadTime = now
 
         wv.post {
-            if (!hasLoadedFirstVideo) {
+            if (!hasLoadedFirstVideo || !isPlayerReady) {
                 hasLoadedFirstVideo = true
+                isPlayerReady = false
                 val html = buildIframeHtml(videoId, startSeconds, if (autoplay) 1 else 0)
                 wv.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
             } else {
@@ -124,6 +130,7 @@ object WebViewHolder {
     }
 
     fun play() {
+        if (!isPlayerReady) return
         webView?.post {
             webView?.evaluateJavascript(
                 "if(typeof player!=='undefined'&&player.playVideo) player.playVideo();", null
@@ -132,6 +139,7 @@ object WebViewHolder {
     }
 
     fun pause() {
+        if (!isPlayerReady) return
         webView?.post {
             webView?.evaluateJavascript(
                 "if(typeof player!=='undefined'&&player.pauseVideo) player.pauseVideo();", null
@@ -140,14 +148,16 @@ object WebViewHolder {
     }
 
     fun seekTo(seconds: Float) {
+        if (!isPlayerReady) return
         webView?.post {
             webView?.evaluateJavascript(
-                "if(typeof player!=='undefined'&&player.seekTo) player.seekTo($seconds,true);", null
+                "if(typeof player!=='undefined'&&player.seekTo) player.seekTo($seconds, true);", null
             )
         }
     }
 
     fun setVolume(volume: Int) {
+        if (!isPlayerReady) return
         webView?.post {
             webView?.evaluateJavascript(
                 "if(typeof player!=='undefined'&&player.setVolume) player.setVolume($volume);", null
@@ -159,6 +169,7 @@ object WebViewHolder {
         webView?.destroy()
         webView = null
         isInitialized = false
+        isPlayerReady = false
         hasLoadedFirstVideo = false
         Log.d("WebViewHolder", "WebView destroyed")
     }
@@ -258,6 +269,7 @@ class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) 
 
     @JavascriptInterface fun onPlayerReady() {
         FirebaseCrashlytics.getInstance().log("YT player ready")
+        WebViewHolder.setPlayerReady(true)
         activeViewModel?.setLoading(false)
     }
 
