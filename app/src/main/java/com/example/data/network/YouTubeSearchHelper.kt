@@ -87,7 +87,7 @@ object YouTubeSearchHelper {
                     ?: extractValue(part, "\"simpleText\":\"([0-9:]{2,5})\"")
                     ?: "3:30"
 
-                val thumbnailUrl = "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+                val thumbnailUrl = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
                 
                 results.add(
                     YouTubeVideo(
