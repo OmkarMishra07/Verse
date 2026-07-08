@@ -1653,17 +1653,17 @@ fun JammingScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 8.dp), 
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier.weight(1f),
+                    androidx.compose.foundation.layout.BoxWithConstraints(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
+                        val size = minOf(maxWidth, maxHeight, 300.dp)
                         coil.compose.AsyncImage(
                             model = currentTrack?.thumbnailUrl,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .sizeIn(maxWidth = 260.dp, maxHeight = 260.dp)
-                                .aspectRatio(1f)
+                                .size(size)
                                 .clip(RoundedCornerShape(12.dp))
                         )
                     }
