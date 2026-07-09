@@ -192,7 +192,11 @@ fun iPodPlayerApp(
     }
     
     val userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
-    val fullGreeting = "Welcome, $userName."
+    val fullGreeting = if (currentUser?.email == "yaduvanshishambhavi2911@gmail.com") {
+        "Welcome Sunflower \uD83C\uDF3B"
+    } else {
+        "Welcome, $userName."
+    }
     
     // Dialog states
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
