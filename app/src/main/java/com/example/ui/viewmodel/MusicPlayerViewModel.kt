@@ -159,6 +159,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _globalOrLocalHits = MutableStateFlow<List<Track>>(emptyList())
     val globalOrLocalHits = _globalOrLocalHits.asStateFlow()
 
+    private val _currentLyrics = MutableStateFlow<String?>(null)
+    val currentLyrics = _currentLyrics.asStateFlow()
+
     private val _moodTracks = MutableStateFlow<List<Track>>(emptyList())
     val moodTracks = _moodTracks.asStateFlow()
 
@@ -702,6 +705,28 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 }
             }
 
+            // Prefetch lyrics in the background so they are instantly available when the user clicks the Lyrics button
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val trackTitle = resolved.title
+                    val cleanTitle = trackTitle
+                        .replace(Regex("(?i)\\(.*?official.*?\\)|\\[.*?official.*?\\]|\\(.*?lyric.*?\\)|\\[.*?lyric.*?\\]|\\(.*?video.*?\\)|\\[.*?video.*?\\]|\\(.*?audio.*?\\)|\\[.*?audio.*?\\]"), "")
+                        .replace(Regex("(?i)ft\\..*|feat\\..*"), "")
+                        .replace(Regex("\\|.*"), "")
+                        .replace(Regex(" - .*"), "")
+                        .replace(Regex("(?i)full video|full song|video song|audio song|lyrical video|lyrical"), "")
+                        .trim()
+                        
+                    val labels = listOf("T-Series", "Zee Music Company", "Sony Music India", "YRF", "Speed Records", "Desi Melodies")
+                    val cleanArtist = if (labels.any { resolved.artist.contains(it, ignoreCase = true) }) "" else resolved.artist
+
+                    val fetchedLyrics = com.example.data.network.LRCLibHelper.fetchLyrics(cleanTitle, cleanArtist)
+                    _currentLyrics.value = fetchedLyrics
+                } catch (e: Exception) {
+                    _currentLyrics.value = null
+                }
+            }
+            
             try {
                 val recentlyPlayed = resolved.toRecentlyPlayed()
                 songDao.insertRecentlyPlayed(recentlyPlayed)

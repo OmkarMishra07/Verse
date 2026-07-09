@@ -51,10 +51,19 @@ object LRCLibHelper {
 
     private val service = retrofit.create(LRCLibService::class.java)
 
+    private val lyricsCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     suspend fun fetchLyrics(trackName: String, artistName: String): String? {
+        val cacheKey = "${trackName}_${artistName}"
+        lyricsCache[cacheKey]?.let { return it }
+
         return try {
             val response = service.getLyrics(trackName, artistName)
-            response.syncedLyrics ?: response.plainLyrics
+            val result = response.syncedLyrics ?: response.plainLyrics
+            if (result != null) {
+                lyricsCache[cacheKey] = result
+            }
+            result
         } catch (e: Exception) {
             Log.e("LRCLibHelper", "Failed to fetch lyrics for $trackName by $artistName: ${e.message}")
             null
