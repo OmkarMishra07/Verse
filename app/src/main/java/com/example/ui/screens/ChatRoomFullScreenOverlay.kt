@@ -341,12 +341,29 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
                                 }
 
                                 if (showEmojiPicker) {
-                                    Row(modifier = Modifier.background(Color(0xFF333333), RoundedCornerShape(20.dp)).padding(4.dp).offset(y = (-30).dp)) {
-                                        listOf("👍", "❤️", "😂", "🔥", "🎵").forEach { emoji ->
-                                            Text(emoji, fontSize = 22.sp, modifier = Modifier.clickable {
-                                                showEmojiPicker = false
-                                                coroutineScope.launch { com.example.data.remote.JammingService.addReaction(jammingRoomId, msg.id, emoji, myName) }
-                                            }.padding(8.dp))
+                                    androidx.compose.ui.window.Popup(
+                                        alignment = Alignment.TopCenter,
+                                        offset = androidx.compose.ui.unit.IntOffset(0, -120),
+                                        onDismissRequest = { showEmojiPicker = false }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .background(Color(0xFF2A2A2A), RoundedCornerShape(24.dp))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            listOf("👍", "❤️", "😂", "🔥", "🎵").forEach { emoji ->
+                                                Text(
+                                                    emoji, 
+                                                    fontSize = 24.sp, 
+                                                    modifier = Modifier
+                                                        .clickable {
+                                                            showEmojiPicker = false
+                                                            coroutineScope.launch { com.example.data.remote.JammingService.addReaction(jammingRoomId, msg.id, emoji, myName) }
+                                                        }
+                                                        .padding(4.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
