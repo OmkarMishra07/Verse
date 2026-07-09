@@ -54,6 +54,9 @@ interface SongDao {
     @Delete
     suspend fun deleteLikedSong(song: LikedSong)
 
+    @Query("DELETE FROM liked_songs WHERE videoId = :videoId")
+    suspend fun deleteLikedSongById(videoId: String)
+
     @Query("SELECT EXISTS(SELECT 1 FROM liked_songs WHERE videoId = :videoId)")
     fun isLiked(videoId: String): Flow<Boolean>
 

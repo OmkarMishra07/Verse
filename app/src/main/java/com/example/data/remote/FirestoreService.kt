@@ -100,7 +100,9 @@ object FirestoreService {
                 "artist"       to song.artist,
                 "thumbnailUrl" to song.thumbnailUrl,
                 "duration"     to song.duration,
-                "likedAt"      to com.google.firebase.Timestamp(song.addedAt / 1000, 0)
+                "likedAt"      to com.google.firebase.Timestamp(song.addedAt / 1000, 0),
+                "updatedAt"    to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "deleted"      to false
             )
             likedSongsCol(userId).document(song.videoId).set(data).await()
         } catch (e: Exception) {
@@ -111,33 +113,52 @@ object FirestoreService {
 
     suspend fun deleteLikedSong(userId: String, videoId: String) {
         try {
-            likedSongsCol(userId).document(videoId).delete().await()
+            val data = mapOf(
+                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "deleted"   to true
+            )
+            likedSongsCol(userId).document(videoId).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "deleteLikedSong failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
-    /** Returns all liked songs from Firestore. */
-    suspend fun fetchLikedSongs(userId: String): List<LikedSong> {
+    /** Returns all liked songs from Firestore updated since a timestamp. */
+    suspend fun fetchLikedSongsUpdates(userId: String, sinceMs: Long): Pair<List<LikedSong>, List<String>> {
         return try {
-            likedSongsCol(userId).get().await().documents.mapNotNull { doc ->
-                LikedSong(
-                    videoId      = doc.getString("videoId") ?: return@mapNotNull null,
-                    title        = doc.getString("title") ?: "",
-                    artist       = doc.getString("artist") ?: "",
-                    thumbnailUrl = doc.getString("thumbnailUrl") ?: "",
-                    duration     = doc.getString("duration") ?: "",
-                    addedAt      = (doc.getTimestamp("likedAt")?.seconds ?: 0L) * 1000L
-                )
+            val query = if (sinceMs > 0) {
+                val timestamp = com.google.firebase.Timestamp(sinceMs / 1000, ((sinceMs % 1000) * 1000000).toInt())
+                likedSongsCol(userId).whereGreaterThan("updatedAt", timestamp)
+            } else {
+                likedSongsCol(userId)
             }
+            
+            val upserted = mutableListOf<LikedSong>()
+            val deletedIds = mutableListOf<String>()
+            
+            query.get().await().documents.forEach { doc ->
+                if (doc.getBoolean("deleted") == true) {
+                    deletedIds.add(doc.id)
+                } else {
+                    val song = LikedSong(
+                        videoId      = doc.getString("videoId") ?: return@forEach,
+                        title        = doc.getString("title") ?: "",
+                        artist       = doc.getString("artist") ?: "",
+                        thumbnailUrl = doc.getString("thumbnailUrl") ?: "",
+                        duration     = doc.getString("duration") ?: "",
+                        addedAt      = (doc.getTimestamp("likedAt")?.seconds ?: 0L) * 1000L
+                    )
+                    upserted.add(song)
+                }
+            }
+            upserted to deletedIds
         } catch (e: Exception) {
-            Log.e(TAG, "fetchLikedSongs failed: ${e.message}")
+            Log.e(TAG, "fetchLikedSongsUpdates failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
-            emptyList()
+            emptyList<LikedSong>() to emptyList<String>()
         }
     }
-
     // ──────────────────────────────────────────────────────────────
     //  Play History (max 50)
     // ──────────────────────────────────────────────────────────────
@@ -199,9 +220,11 @@ object FirestoreService {
             val data = mapOf(
                 "playlistId" to playlist.id,
                 "name"       to playlist.name,
-                "createdAt"  to com.google.firebase.Timestamp(playlist.createdAt / 1000, 0)
+                "createdAt"  to com.google.firebase.Timestamp(playlist.createdAt / 1000, 0),
+                "updatedAt"  to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "deleted"    to false
             )
-            playlistsCol(userId).document(playlist.id.toString()).set(data).await()
+            playlistsCol(userId).document(playlist.id.toString()).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "upsertPlaylist failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
@@ -210,10 +233,12 @@ object FirestoreService {
 
     suspend fun deletePlaylist(userId: String, playlistId: Long) {
         try {
-            // Delete all songs first
-            val songs = playlistSongsCol(userId, playlistId).get().await()
-            songs.documents.forEach { it.reference.delete() }
-            playlistsCol(userId).document(playlistId.toString()).delete().await()
+            // Soft delete the playlist. Local DB cascade will handle songs.
+            val data = mapOf(
+                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "deleted"   to true
+            )
+            playlistsCol(userId).document(playlistId.toString()).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "deletePlaylist failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
@@ -231,6 +256,9 @@ object FirestoreService {
                 "displayOrder" to song.displayOrder
             )
             playlistSongsCol(userId, song.playlistId).document(song.videoId).set(data).await()
+            // Touch parent playlist so it gets picked up by Delta Sync
+            val parentUpdate = mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())
+            playlistsCol(userId).document(song.playlistId.toString()).set(parentUpdate, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "upsertPlaylistSong failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
@@ -240,41 +268,59 @@ object FirestoreService {
     suspend fun deletePlaylistSong(userId: String, playlistId: Long, videoId: String) {
         try {
             playlistSongsCol(userId, playlistId).document(videoId).delete().await()
+            // Touch parent playlist so it gets picked up by Delta Sync
+            val parentUpdate = mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())
+            playlistsCol(userId).document(playlistId.toString()).set(parentUpdate, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.e(TAG, "deletePlaylistSong failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
 
-    /** Fetch all playlists + their songs for a user. */
-    suspend fun fetchPlaylists(userId: String): List<Pair<Playlist, List<PlaylistSong>>> {
+    /** Fetch playlists updated since timestamp. Returns pair of (upserted, deletedIds) */
+    suspend fun fetchPlaylistUpdates(userId: String, sinceMs: Long): Pair<List<Pair<Playlist, List<PlaylistSong>>>, List<Long>> {
         return try {
-            val playlistDocs = playlistsCol(userId).get().await().documents
-            playlistDocs.mapNotNull { doc ->
-                val id   = doc.getLong("playlistId") ?: return@mapNotNull null
-                val name = doc.getString("name") ?: ""
-                val createdAt = (doc.getTimestamp("createdAt")?.seconds ?: 0L) * 1000L
-                val playlist = Playlist(id = id, name = name, createdAt = createdAt)
-
-                val songs = playlistSongsCol(userId, id)
-                    .orderBy("displayOrder")
-                    .get().await().documents.mapNotNull { sdoc ->
-                        PlaylistSong(
-                            playlistId   = id,
-                            videoId      = sdoc.getString("videoId") ?: return@mapNotNull null,
-                            title        = sdoc.getString("title") ?: "",
-                            artist       = sdoc.getString("artist") ?: "",
-                            thumbnailUrl = sdoc.getString("thumbnailUrl") ?: "",
-                            duration     = sdoc.getString("duration") ?: "",
-                            displayOrder = (sdoc.getLong("displayOrder") ?: 0L).toInt()
-                        )
-                    }
-                playlist to songs
+            val query = if (sinceMs > 0) {
+                val timestamp = com.google.firebase.Timestamp(sinceMs / 1000, ((sinceMs % 1000) * 1000000).toInt())
+                playlistsCol(userId).whereGreaterThan("updatedAt", timestamp)
+            } else {
+                playlistsCol(userId)
             }
+            
+            val upserted = mutableListOf<Pair<Playlist, List<PlaylistSong>>>()
+            val deletedIds = mutableListOf<Long>()
+            
+            query.get().await().documents.forEach { doc ->
+                val id = doc.getLong("playlistId") ?: return@forEach
+                if (doc.getBoolean("deleted") == true) {
+                    deletedIds.add(id)
+                } else {
+                    val name = doc.getString("name") ?: ""
+                    val createdAt = (doc.getTimestamp("createdAt")?.seconds ?: 0L) * 1000L
+                    val playlist = Playlist(id = id, name = name, createdAt = createdAt)
+
+                    // If playlist was updated, just fetch all its current songs (usually a small number)
+                    val songs = playlistSongsCol(userId, id)
+                        .orderBy("displayOrder")
+                        .get().await().documents.mapNotNull { sdoc ->
+                            PlaylistSong(
+                                playlistId   = id,
+                                videoId      = sdoc.getString("videoId") ?: return@mapNotNull null,
+                                title        = sdoc.getString("title") ?: "",
+                                artist       = sdoc.getString("artist") ?: "",
+                                thumbnailUrl = sdoc.getString("thumbnailUrl") ?: "",
+                                duration     = sdoc.getString("duration") ?: "",
+                                displayOrder = (sdoc.getLong("displayOrder") ?: 0L).toInt()
+                            )
+                        }
+                    upserted.add(playlist to songs)
+                }
+            }
+            upserted to deletedIds
         } catch (e: Exception) {
-            Log.e(TAG, "fetchPlaylists failed: ${e.message}")
+            Log.e(TAG, "fetchPlaylistUpdates failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
-            emptyList()
+            emptyList<Pair<Playlist, List<PlaylistSong>>>() to emptyList<Long>()
         }
     }
 }

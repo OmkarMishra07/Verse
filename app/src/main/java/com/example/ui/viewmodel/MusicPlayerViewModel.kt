@@ -1097,20 +1097,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             // Limit full remote sync to once every 24 hours to aggressively save Firestore READ quotas.
             // Local Room DB will serve as the primary source of truth in the meantime.
             if (now - lastSync > 24 * 60 * 60 * 1000L) {
-                val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
-                firestoreLiked.forEach { songDao.insertLikedSong(it) }
+                val (upsertedLiked, deletedLikedIds) = com.example.data.remote.FirestoreService.fetchLikedSongsUpdates(uid, lastSync)
+                upsertedLiked.forEach { songDao.insertLikedSong(it) }
+                deletedLikedIds.forEach { songDao.deleteLikedSongById(it) }
     
                 // Cloud History sync disabled to preserve quotas. History is strictly device-local.
     
-                val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
-                firestorePlaylists.forEach { (playlist, songs) ->
+                val (upsertedPlaylists, deletedPlaylistIds) = com.example.data.remote.FirestoreService.fetchPlaylistUpdates(uid, lastSync)
+                upsertedPlaylists.forEach { (playlist, songs) ->
                     songDao.insertPlaylist(playlist)
                     songDao.deleteSongsForPlaylist(playlist.id) // explicitly wipe local songs before sync
                     songs.forEach { songDao.insertPlaylistSong(it) }
                 }
+                deletedPlaylistIds.forEach {
+                    songDao.deletePlaylist(it)
+                    songDao.deleteSongsForPlaylist(it)
+                }
                 
                 prefs.edit().putLong("last_firestore_sync_$uid", now).apply()
-                android.util.Log.d("MusicPlayerViewModel", "Performed full 24h Firestore sync for user $uid")
+                android.util.Log.d("MusicPlayerViewModel", "Performed Delta Firestore sync for user $uid")
             } else {
                 android.util.Log.d("MusicPlayerViewModel", "Skipped Firestore sync (already synced in the last 24h)")
             }
