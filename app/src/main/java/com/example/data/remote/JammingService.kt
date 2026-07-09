@@ -199,7 +199,7 @@ object JammingService {
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
         val listener = messagesCol(roomId)
             .orderBy("timestamp")
-            .limitToLast(50)
+            .limitToLast(20)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
