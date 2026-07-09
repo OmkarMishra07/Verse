@@ -26,7 +26,8 @@ data class JammingRoom(
     val playing: Boolean = false,
     val positionMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
-    val participants: List<String> = emptyList()
+    val participants: List<String> = emptyList(),
+    val lastActivityTimestamp: com.google.firebase.Timestamp? = null // For Firestore TTL
 )
 
 data class ChatMessage(
@@ -49,7 +50,13 @@ object JammingService {
 
     suspend fun createRoom(roomId: String, hostId: String, hostName: String): Boolean {
         return try {
-            val room = JammingRoom(roomId = roomId, hostId = hostId, hostName = hostName, participants = listOf(hostName))
+            val room = JammingRoom(
+                roomId = roomId, 
+                hostId = hostId, 
+                hostName = hostName, 
+                participants = listOf(hostName),
+                lastActivityTimestamp = com.google.firebase.Timestamp.now()
+            )
             roomsCol().document(roomId).set(room).await()
             true
         } catch (e: Exception) {
@@ -60,7 +67,10 @@ object JammingService {
 
     suspend fun joinRoom(roomId: String, participantName: String): Boolean {
         return try {
-            roomsCol().document(roomId).update("participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName)).await()
+            roomsCol().document(roomId).update(
+                "participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName),
+                "lastActivityTimestamp", com.google.firebase.Timestamp.now()
+            ).await()
             sendMessage(roomId, "System", "$participantName joined the jam", isSystemMessage = true)
             true
         } catch (e: Exception) {
@@ -71,7 +81,10 @@ object JammingService {
 
     suspend fun leaveRoom(roomId: String, participantName: String): Boolean {
         return try {
-            roomsCol().document(roomId).update("participants", com.google.firebase.firestore.FieldValue.arrayRemove(participantName)).await()
+            roomsCol().document(roomId).update(
+                "participants", com.google.firebase.firestore.FieldValue.arrayRemove(participantName),
+                "lastActivityTimestamp", com.google.firebase.Timestamp.now()
+            ).await()
             sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
             true
         } catch (e: Exception) {
@@ -90,7 +103,8 @@ object JammingService {
             val updates = mutableMapOf<String, Any>(
                 "playing" to isPlaying,
                 "positionMs" to positionMs,
-                "updatedAt" to System.currentTimeMillis()
+                "updatedAt" to System.currentTimeMillis(),
+                "lastActivityTimestamp" to com.google.firebase.Timestamp.now()
             )
             track?.let {
                 updates["currentTrackId"] = it.id
@@ -183,16 +197,19 @@ object JammingService {
     }
 
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
-        val listener = messagesCol(roomId).orderBy("timestamp").addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
+        val listener = messagesCol(roomId)
+            .orderBy("timestamp")
+            .limitToLast(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val messages = snapshot.documents.mapNotNull { it.toObject(ChatMessage::class.java) }
+                    trySend(messages)
+                }
             }
-            if (snapshot != null) {
-                val messages = snapshot.documents.mapNotNull { it.toObject(ChatMessage::class.java) }
-                trySend(messages)
-            }
-        }
         awaitClose { listener.remove() }
     }
 }

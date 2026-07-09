@@ -481,9 +481,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         fetchExploreContent()
 
-        val musicPrefs = application.getSharedPreferences("music_prefs", android.content.Context.MODE_PRIVATE)
         if (savedTrack == null) {
-            val lastTrackId = musicPrefs.getString("last_track_id", null)
+            val lastTrackId = prefs.getString("last_track_id", null)
             if (lastTrackId != null) {
                 savedTrack = Track(
                     id = lastTrackId,
@@ -706,9 +705,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             try {
                 val recentlyPlayed = resolved.toRecentlyPlayed()
                 songDao.insertRecentlyPlayed(recentlyPlayed)
-                currentUserId?.let { uid ->
-                    com.example.data.remote.FirestoreService.upsertHistory(uid, recentlyPlayed)
-                }
+                // Removed Firestore upsertHistory here to save massively on Firebase WRITE quotas
+                // History is now 100% device-local and free!
             } catch (e: Exception) {
                 Log.e("MusicPlayerViewModel", "Failed to record play history: ${e.message}", e)
                 FirebaseCrashlytics.getInstance().recordException(e)
@@ -1102,8 +1100,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val firestoreLiked = com.example.data.remote.FirestoreService.fetchLikedSongs(uid)
                 firestoreLiked.forEach { songDao.insertLikedSong(it) }
     
-                val firestoreHistory = com.example.data.remote.FirestoreService.fetchHistory(uid)
-                firestoreHistory.forEach { songDao.insertRecentlyPlayed(it) }
+                // Cloud History sync disabled to preserve quotas. History is strictly device-local.
     
                 val firestorePlaylists = com.example.data.remote.FirestoreService.fetchPlaylists(uid)
                 firestorePlaylists.forEach { (playlist, songs) ->
