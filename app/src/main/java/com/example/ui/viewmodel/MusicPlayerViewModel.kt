@@ -530,7 +530,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                         .putString("last_track_album", track.album)
                         .putString("last_track_thumb", track.thumbnailUrl)
                         .putString("last_track_duration", track.duration)
-                        .apply()
+                        .commit()
                 }
             }
         }
@@ -540,7 +540,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             currentPositionMs.collect { pos -> 
                 savedPositionMs = pos 
-                prefs.edit().putLong("last_position_ms", pos).apply()
+                prefs.edit().putLong("last_position_ms", pos).commit()
             }
         }
         viewModelScope.launch {
@@ -549,13 +549,13 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             queue.collect { q ->
                 savedQueue = q
-                prefs.edit().putString("last_queue_json", serializeTrackList(q)).apply()
+                prefs.edit().putString("last_queue_json", serializeTrackList(q)).commit()
             }
         }
         viewModelScope.launch {
-            currentQueueIndex.collect { idx ->
-                savedQueueIndex = idx
-                prefs.edit().putInt("last_queue_index", idx).apply()
+            currentQueueIndex.collect { idx -> 
+                savedQueueIndex = idx 
+                prefs.edit().putInt("last_queue_index", idx).commit()
             }
         }
 
