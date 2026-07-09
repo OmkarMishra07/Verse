@@ -78,7 +78,25 @@ fun SyncedLyricsDialog(
         isLoading = true
         error = null
         try {
-            val lyricsStr = LRCLibHelper.fetchLyrics(track.title, track.artist)
+            var cleanTitle = track.title
+                // Strip standard tags
+                .replace(Regex("(?i)\\(.*?official.*?\\)|\\[.*?official.*?\\]|\\(.*?lyric.*?\\)|\\[.*?lyric.*?\\]|\\(.*?video.*?\\)|\\[.*?video.*?\\]|\\(.*?audio.*?\\)|\\[.*?audio.*?\\]"), "")
+                // Strip "ft." or "feat."
+                .replace(Regex("(?i)ft\\..*|feat\\..*"), "")
+                // Strip everything after a pipe "|" (Very common in Hindi songs: "Title | Movie | Actors")
+                .replace(Regex("\\|.*"), "")
+                // Strip everything after a hyphen if it looks like extra metadata (but keep it if it's short)
+                .replace(Regex(" - .*"), "")
+                // Strip common Hindi tags
+                .replace(Regex("(?i)full video|full song|video song|audio song|lyrical video|lyrical"), "")
+                .trim()
+                
+            // If channel is a music label (like T-Series), LRCLib won't match the artist. 
+            // We pass an empty string for artist if it's a known label, forcing LRCLib to search by title only.
+            val labels = listOf("T-Series", "Zee Music Company", "Sony Music India", "YRF", "Speed Records", "Desi Melodies")
+            val cleanArtist = if (labels.any { track.artist.contains(it, ignoreCase = true) }) "" else track.artist
+
+            val lyricsStr = LRCLibHelper.fetchLyrics(cleanTitle, cleanArtist)
             if (lyricsStr.isNullOrEmpty()) {
                 error = "No lyrics found for this track."
             } else {
