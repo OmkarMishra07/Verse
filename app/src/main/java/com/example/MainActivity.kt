@@ -196,6 +196,7 @@ fun iPodPlayerApp(
     
     // Dialog states
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var showImportPlaylistDialog by remember { mutableStateOf(false) }
     var playlistToAddTo by remember { mutableStateOf<Track?>(null) }
     var showLyricsDialog by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<com.example.data.network.UpdateHelper.UpdateInfo?>(null) }
@@ -267,6 +268,7 @@ fun iPodPlayerApp(
         viewModel = viewModel,
         isExpanded = isExpanded,
         showCreatePlaylistDialog = { showCreatePlaylistDialog = true },
+        showImportPlaylistDialog = { showImportPlaylistDialog = true },
         playlistToAddTo = playlistToAddTo,
         onAddTrackToPlaylist = { playlistToAddTo = it },
         onShowLyrics = { showLyricsDialog = true },
@@ -349,6 +351,58 @@ fun iPodPlayerApp(
         )
     }
 
+    if (showImportPlaylistDialog) {
+        var importShareCode by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showImportPlaylistDialog = false },
+            title = { Text("Import Shared Playlist", color = Color.White) },
+            text = {
+                OutlinedTextField(
+                    value = importShareCode,
+                    onValueChange = { importShareCode = it },
+                    label = { Text("Share Code", color = Color.Gray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = iPodAccentBlue,
+                        unfocusedBorderColor = Color.Gray
+                    ),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val code = importShareCode.trim()
+                        val parts = code.split("_")
+                        if (parts.size == 2) {
+                            val ownerId = parts[0].trim()
+                            val pid = parts[1].trim().toLongOrNull()
+                            if (pid != null) {
+                                viewModel.importSharedPlaylist(ownerId, pid)
+                                Toast.makeText(context, "Importing playlist...", Toast.LENGTH_SHORT).show()
+                                showImportPlaylistDialog = false
+                            } else {
+                                Toast.makeText(context, "Invalid share code", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "Invalid share code", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Import", color = iPodAccentBlue)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportPlaylistDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E2633)
+        )
+    }
+
     playlistToAddTo?.let { track ->
         AlertDialog(
             onDismissRequest = { playlistToAddTo = null },
@@ -402,6 +456,7 @@ fun iPodDeviceFrame(
     viewModel: MusicPlayerViewModel,
     isExpanded: Boolean,
     showCreatePlaylistDialog: () -> Unit,
+    showImportPlaylistDialog: () -> Unit,
     playlistToAddTo: Track?,
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
@@ -438,6 +493,7 @@ fun iPodDeviceFrame(
                 isExpanded = isExpanded,
                 modifier = Modifier.weight(displayWeight),
                 showCreatePlaylistDialog = showCreatePlaylistDialog,
+                showImportPlaylistDialog = showImportPlaylistDialog,
                 onAddTrackToPlaylist = onAddTrackToPlaylist,
                 onShowLyrics = onShowLyrics,
                 currentUser = currentUser,
@@ -547,7 +603,7 @@ fun iPodDeviceFrame(
                 viewModel = viewModel,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
+                    .padding(bottom = 12.dp, start = 24.dp, end = 24.dp)
             )
         }
     }
@@ -632,6 +688,7 @@ fun iPodScreenDisplay(
     isExpanded: Boolean,
     modifier: Modifier = Modifier,
     showCreatePlaylistDialog: () -> Unit,
+    showImportPlaylistDialog: () -> Unit,
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
     currentUser: com.google.firebase.auth.FirebaseUser?,
@@ -777,7 +834,8 @@ fun iPodScreenDisplay(
                             )
                             ScreenType.LIBRARY -> LibraryScreen(
                                 viewModel = viewModel,
-                                onCreatePlaylistClick = showCreatePlaylistDialog
+                                onCreatePlaylistClick = showCreatePlaylistDialog,
+                                onImportPlaylistClick = showImportPlaylistDialog
                             )
                             ScreenType.JAMMING -> JammingScreen(
                                 viewModel = viewModel,
@@ -1819,9 +1877,7 @@ fun JammingScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var showJamSearch by remember { mutableStateOf(false) }
 
-    val chatMessages by remember(jammingRoomId) {
-        if (jammingRoomId.isNotBlank()) com.example.data.remote.JammingService.listenToMessages(jammingRoomId) else kotlinx.coroutines.flow.flowOf(emptyList())
-    }.collectAsState(initial = emptyList())
+    val chatMessages by viewModel.jammingRoomMessages.collectAsState()
 
     LaunchedEffect(chatMessages.size) {
         if (!isChatOpen && chatMessages.isNotEmpty()) {
@@ -1877,6 +1933,14 @@ fun JammingScreen(
             }, colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray), modifier = Modifier.fillMaxWidth(0.6f)) {
                 Text("Create New Room")
             }
+            Spacer(modifier = Modifier.height(32.dp))
+            Text(
+                "Rooms are automatically deleted after 2 hours of inactivity.",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 12.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
         }
     } else {
         if (showShareDialog) {
@@ -2419,7 +2483,8 @@ fun SpotifyCard(track: Track, isFocused: Boolean, onClick: () -> Unit) {
 @Composable
 fun LibraryScreen(
     viewModel: MusicPlayerViewModel,
-    onCreatePlaylistClick: () -> Unit
+    onCreatePlaylistClick: () -> Unit,
+    onImportPlaylistClick: () -> Unit
 ) {
     val selectedTab by viewModel.libraryTab.collectAsState()
     val tabs = listOf("Liked Songs", "Playlists")
@@ -2470,7 +2535,7 @@ fun LibraryScreen(
             if (page == 0) {
                 LikedScreen(viewModel = viewModel)
             } else {
-                PlaylistsScreen(viewModel = viewModel, onCreatePlaylistClick = onCreatePlaylistClick)
+                PlaylistsScreen(viewModel = viewModel, onCreatePlaylistClick = onCreatePlaylistClick, onImportPlaylistClick = onImportPlaylistClick)
             }
         }
     }
@@ -2672,7 +2737,8 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
 @Composable
 fun PlaylistsScreen(
     viewModel: MusicPlayerViewModel,
-    onCreatePlaylistClick: () -> Unit
+    onCreatePlaylistClick: () -> Unit,
+    onImportPlaylistClick: () -> Unit
 ) {
     val playlists by viewModel.playlists.collectAsState()
     val focusedIndex by viewModel.focusedIndex.collectAsState()
@@ -2738,10 +2804,49 @@ fun PlaylistsScreen(
                     )
                 }
             }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable { onImportPlaylistClick() }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(Color.White.copy(0.2f), Color.White.copy(0.05f)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "Import Shared Playlist",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
 
-            // Playlist items (Index shifted by +1)
+            // Playlist items (Index shifted by +2)
             itemsIndexed(playlists) { i, playlist ->
-                val index = i + 1 // Offset by 1 for the Create Playlist item
+                val index = i + 2 // Offset by 2 for the Create/Import Playlist items
                 val isFocused = index == focusedIndex
                 Row(
                     modifier = Modifier
@@ -2859,6 +2964,31 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.padding(4.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    
+                    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(
+                        onClick = { 
+                            val uid = viewModel.currentUserId ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                            val pid = playlist?.id
+                            if (uid != null && pid != null) {
+                                val shareCode = "${uid}_${pid}"
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(shareCode))
+                                Toast.makeText(context, "Share Code copied!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Sign in to share", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.size(28.dp).background(Color.Black.copy(alpha=0.3f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share",
                             tint = Color.White,
                             modifier = Modifier.padding(4.dp)
                         )

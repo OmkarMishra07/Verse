@@ -184,6 +184,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _jammingRoomState = MutableStateFlow<com.example.data.remote.JammingRoom?>(null)
     val jammingRoomState = _jammingRoomState.asStateFlow()
     
+    private val _jammingRoomMessages = MutableStateFlow<List<com.example.data.remote.ChatMessage>>(emptyList())
+    val jammingRoomMessages = _jammingRoomMessages.asStateFlow()
+    
     fun setJammingRoomId(roomId: String) {
         _jammingRoomId.value = roomId
     }
@@ -562,14 +565,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             _jammingRoomId.collectLatest { roomId ->
                 if (roomId.isNotBlank()) {
-                    com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
-                        _jammingRoomState.value = room
-                        if (room != null) {
-                            syncFromRemote(room)
+                    launch {
+                        com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
+                            _jammingRoomState.value = room
+                            if (room != null) {
+                                syncFromRemote(room)
+                            }
+                        }
+                    }
+                    launch {
+                        com.example.data.remote.JammingService.listenToMessages(roomId).collect { msgs ->
+                            _jammingRoomMessages.value = msgs
                         }
                     }
                 } else {
                     _jammingRoomState.value = null
+                    _jammingRoomMessages.value = emptyList()
                 }
             }
         }
@@ -644,7 +655,41 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun selectPlaylist(playlist: Playlist) {
         _selectedPlaylist.value = playlist
+        if (playlist.sharedUserId != null && playlist.sharedPlaylistId != null) {
+            viewModelScope.launch {
+                val result = com.example.data.remote.FirestoreService.fetchSharedPlaylist(
+                    playlist.sharedUserId,
+                    playlist.sharedPlaylistId
+                )
+                if (result != null) {
+                    val (_, remoteSongs) = result
+                    songDao.deleteSongsForPlaylist(playlist.id)
+                    remoteSongs.forEach { song ->
+                        songDao.insertPlaylistSong(song.copy(playlistId = playlist.id))
+                    }
+                }
+            }
+        }
         setScreen(ScreenType.PLAYLIST_DETAIL)
+    }
+
+    fun importSharedPlaylist(ownerId: String, sharedPlaylistId: Long) {
+        viewModelScope.launch {
+            val result = com.example.data.remote.FirestoreService.fetchSharedPlaylist(ownerId, sharedPlaylistId)
+            if (result != null) {
+                val (remotePlaylist, remoteSongs) = result
+                val newPlaylistId = songDao.insertPlaylist(
+                    Playlist(
+                        name = "${remotePlaylist.name}",
+                        sharedUserId = ownerId,
+                        sharedPlaylistId = sharedPlaylistId
+                    )
+                )
+                remoteSongs.forEach { song ->
+                    songDao.insertPlaylistSong(song.copy(playlistId = newPlaylistId))
+                }
+            }
+        }
     }
 
     // Liked status checking (reactive check per video id)

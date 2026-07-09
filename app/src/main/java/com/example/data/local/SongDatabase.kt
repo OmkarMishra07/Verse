@@ -17,7 +17,9 @@ data class LikedSong(
 data class Playlist(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val sharedUserId: String? = null,
+    val sharedPlaylistId: Long? = null
 )
 
 @Entity(tableName = "playlist_songs")
@@ -129,13 +131,20 @@ interface SongDao {
 
 @Database(
     entities = [LikedSong::class, Playlist::class, PlaylistSong::class, RecentlyPlayed::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class SongDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
 
     companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE playlists ADD COLUMN sharedUserId TEXT")
+                database.execSQL("ALTER TABLE playlists ADD COLUMN sharedPlaylistId INTEGER")
+            }
+        }
+
         @Volatile
         private var INSTANCE: SongDatabase? = null
 
@@ -146,6 +155,7 @@ abstract class SongDatabase : RoomDatabase() {
                     SongDatabase::class.java,
                     "song_database"
                 )
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance

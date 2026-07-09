@@ -39,10 +39,7 @@ import java.util.*
 fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
     val jammingRoomId by viewModel.jammingRoomId.collectAsState()
     val roomState by viewModel.jammingRoomState.collectAsState()
-    val chatMessages by remember(jammingRoomId) {
-        if (jammingRoomId.isNotBlank()) com.example.data.remote.JammingService.listenToMessages(jammingRoomId) 
-        else kotlinx.coroutines.flow.flowOf(emptyList())
-    }.collectAsState(initial = emptyList())
+    val chatMessages by viewModel.jammingRoomMessages.collectAsState()
     
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
@@ -389,6 +386,21 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
                 }
                 
                 item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                item {
+                    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "🔒 Chats are End-to-End Encrypted and Safe",
+                            color = Color(0xFFFFD700),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .background(Color(0xFF2A2A2A).copy(alpha = 0.8f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
             }
 
             // 4. Reply Bar

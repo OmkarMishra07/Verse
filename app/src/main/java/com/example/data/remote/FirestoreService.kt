@@ -222,6 +222,8 @@ object FirestoreService {
                 "name"       to playlist.name,
                 "createdAt"  to com.google.firebase.Timestamp(playlist.createdAt / 1000, 0),
                 "updatedAt"  to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                "sharedUserId" to (playlist.sharedUserId ?: ""),
+                "sharedPlaylistId" to (playlist.sharedPlaylistId ?: 0L),
                 "deleted"    to false
             )
             playlistsCol(userId).document(playlist.id.toString()).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
@@ -297,7 +299,9 @@ object FirestoreService {
                 } else {
                     val name = doc.getString("name") ?: ""
                     val createdAt = (doc.getTimestamp("createdAt")?.seconds ?: 0L) * 1000L
-                    val playlist = Playlist(id = id, name = name, createdAt = createdAt)
+                    val sharedUserId = doc.getString("sharedUserId")?.takeIf { it.isNotBlank() }
+                    val sharedPlaylistId = doc.getLong("sharedPlaylistId")?.takeIf { it > 0L }
+                    val playlist = Playlist(id = id, name = name, createdAt = createdAt, sharedUserId = sharedUserId, sharedPlaylistId = sharedPlaylistId)
 
                     // If playlist was updated, just fetch all its current songs (usually a small number)
                     val songs = playlistSongsCol(userId, id)
@@ -321,6 +325,38 @@ object FirestoreService {
             Log.e(TAG, "fetchPlaylistUpdates failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
             emptyList<Pair<Playlist, List<PlaylistSong>>>() to emptyList<Long>()
+        }
+    }
+
+    /** Fetch a shared playlist from a specific user's Firestore by ID */
+    suspend fun fetchSharedPlaylist(ownerId: String, playlistId: Long): Pair<Playlist, List<PlaylistSong>>? {
+        return try {
+            val doc = playlistsCol(ownerId).document(playlistId.toString()).get().await()
+            if (!doc.exists() || doc.getBoolean("deleted") == true) return null
+
+            val name = doc.getString("name") ?: ""
+            val createdAt = (doc.getTimestamp("createdAt")?.seconds ?: 0L) * 1000L
+            val playlist = Playlist(name = name, createdAt = createdAt, sharedUserId = ownerId, sharedPlaylistId = playlistId)
+
+            val songsList = mutableListOf<PlaylistSong>()
+            val songsQuery = playlistSongsCol(ownerId, playlistId).get().await()
+            songsQuery.documents.forEach { songDoc ->
+                val song = PlaylistSong(
+                    playlistId   = playlist.id, // This will be the new local ID after insertion, we can set it to 0 for now and update later
+                    videoId      = songDoc.id,
+                    title        = songDoc.getString("title") ?: "",
+                    artist       = songDoc.getString("artist") ?: "",
+                    thumbnailUrl = songDoc.getString("thumbnailUrl") ?: "",
+                    duration     = songDoc.getString("duration") ?: "",
+                    displayOrder = songDoc.getLong("displayOrder")?.toInt() ?: 0
+                )
+                songsList.add(song)
+            }
+            playlist to songsList
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchSharedPlaylist failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
+            null
         }
     }
 }
