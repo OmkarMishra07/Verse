@@ -23,11 +23,10 @@ data class LRCLibResponse(
 )
 
 interface LRCLibService {
-    @GET("api/get")
-    suspend fun getLyrics(
-        @Query("track_name") trackName: String,
-        @Query("artist_name") artistName: String
-    ): LRCLibResponse
+    @GET("api/search")
+    suspend fun searchLyrics(
+        @Query("q") query: String
+    ): List<LRCLibResponse>
 }
 
 object LRCLibHelper {
@@ -58,12 +57,29 @@ object LRCLibHelper {
         lyricsCache[cacheKey]?.let { return it }
 
         return try {
-            val response = service.getLyrics(trackName, artistName)
-            val result = response.syncedLyrics ?: response.plainLyrics
-            if (result != null) {
-                lyricsCache[cacheKey] = result
+            val query = "$trackName $artistName".trim()
+            val responseList = service.searchLyrics(query)
+            if (responseList.isNotEmpty()) {
+                val response = responseList.first()
+                val result = response.syncedLyrics ?: response.plainLyrics
+                if (result != null) {
+                    lyricsCache[cacheKey] = result
+                }
+                result
+            } else {
+                // Fallback to searching just the title if no results found
+                val titleOnlyList = service.searchLyrics(trackName)
+                if (titleOnlyList.isNotEmpty()) {
+                    val response = titleOnlyList.first()
+                    val result = response.syncedLyrics ?: response.plainLyrics
+                    if (result != null) {
+                        lyricsCache[cacheKey] = result
+                    }
+                    result
+                } else {
+                    null
+                }
             }
-            result
         } catch (e: Exception) {
             Log.e("LRCLibHelper", "Failed to fetch lyrics for $trackName by $artistName: ${e.message}")
             null
