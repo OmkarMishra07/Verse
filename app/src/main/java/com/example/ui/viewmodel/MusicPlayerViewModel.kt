@@ -713,7 +713,6 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                         .replace(Regex("(?i)\\(.*?official.*?\\)|\\[.*?official.*?\\]|\\(.*?lyric.*?\\)|\\[.*?lyric.*?\\]|\\(.*?video.*?\\)|\\[.*?video.*?\\]|\\(.*?audio.*?\\)|\\[.*?audio.*?\\]"), "")
                         .replace(Regex("(?i)ft\\..*|feat\\..*"), "")
                         .replace(Regex("\\|.*"), "")
-                        .replace(Regex(" - .*"), "")
                         .replace(Regex("(?i)full video|full song|video song|audio song|lyrical video|lyrical"), "")
                         .trim()
                         

@@ -85,8 +85,6 @@ fun SyncedLyricsDialog(
                 .replace(Regex("(?i)ft\\..*|feat\\..*"), "")
                 // Strip everything after a pipe "|" (Very common in Hindi songs: "Title | Movie | Actors")
                 .replace(Regex("\\|.*"), "")
-                // Strip everything after a hyphen if it looks like extra metadata (but keep it if it's short)
-                .replace(Regex(" - .*"), "")
                 // Strip common Hindi tags
                 .replace(Regex("(?i)full video|full song|video song|audio song|lyrical video|lyrical"), "")
                 .trim()
