@@ -95,6 +95,9 @@ interface SongDao {
     @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 20")
     fun getRecentlyPlayed(): Flow<List<RecentlyPlayed>>
 
+    @Query("SELECT * FROM recently_played ORDER BY playedAt DESC LIMIT 500")
+    fun getFullHistory(): Flow<List<RecentlyPlayed>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecentlyPlayed(song: RecentlyPlayed)
 

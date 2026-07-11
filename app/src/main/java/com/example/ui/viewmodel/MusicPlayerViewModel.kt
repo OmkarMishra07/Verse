@@ -435,6 +435,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         .map { list -> list.map { it.toTrack() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val fullHistory: StateFlow<List<Track>> = songDao.getFullHistory()
+        .map { list -> list.map { it.toTrack() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // Active Playlist Detail (for browsing a playlist)
     private val _selectedPlaylist = MutableStateFlow<Playlist?>(null)
     val selectedPlaylist = _selectedPlaylist.asStateFlow()
@@ -448,6 +452,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // Search Flows
     private val _searchQuery = MutableStateFlow("")
+    
+    val isHistoryOpen = MutableStateFlow(false)
     val searchQuery = _searchQuery.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<Track>>(emptyList())
@@ -1161,8 +1167,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     // Auth sync
-    fun onUserLoggedIn(uid: String) {
-        if (currentUserId == uid) return
+    fun onUserLoggedIn(uid: String, forceSync: Boolean = false) {
+        if (currentUserId == uid && !forceSync) return
         currentUserId = uid
         // Tag every crash with a stable anonymous ID for clustering by account
         FirebaseCrashlytics.getInstance().setUserId(uid)
@@ -1173,7 +1179,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             
             // Limit full remote sync to once every 24 hours to aggressively save Firestore READ quotas.
             // Local Room DB will serve as the primary source of truth in the meantime.
-            if (now - lastSync > 24 * 60 * 60 * 1000L) {
+            if (forceSync || now - lastSync > 24 * 60 * 60 * 1000L) {
                 val (upsertedLiked, deletedLikedIds) = com.example.data.remote.FirestoreService.fetchLikedSongsUpdates(uid, lastSync)
                 upsertedLiked.forEach { songDao.insertLikedSong(it) }
                 deletedLikedIds.forEach { songDao.deleteLikedSongById(it) }

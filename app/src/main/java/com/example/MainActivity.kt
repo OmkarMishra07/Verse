@@ -134,6 +134,8 @@ class MainActivity : ComponentActivity() {
                         if (currentUser == null) {
                             AuthScreen(
                                 onAuthSuccess = { user ->
+                                    // Force sync immediately on explicit login
+                                    musicViewModel.onUserLoggedIn(user.uid, forceSync = true)
                                     // Directly update StateFlow — no waiting for AuthStateListener
                                     authViewModel.onUserSignedIn(user)
                                 }
@@ -345,6 +347,19 @@ fun iPodPlayerApp(
         modifier = Modifier.fillMaxSize()
     ) {
         ChatRoomFullScreenOverlay(viewModel = viewModel)
+    }
+    
+    val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
+    AnimatedVisibility(
+        visible = isHistoryOpen,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        com.example.ui.screens.HistoryFullScreenOverlay(
+            viewModel = viewModel, 
+            onBack = { viewModel.isHistoryOpen.value = false }
+        )
     }
 
     AnimatedVisibility(
@@ -972,6 +987,19 @@ fun iPodStatusBar(
         )
         
         Spacer(modifier = Modifier.weight(1f))
+        
+        // History Icon
+        IconButton(
+            onClick = { viewModel.isHistoryOpen.value = true },
+            modifier = Modifier.size(36.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.History,
+                contentDescription = "History",
+                tint = Color.White.copy(alpha = 0.9f)
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
         
         if (currentUser != null) {
             val photoUrl = currentUser.photoUrl
