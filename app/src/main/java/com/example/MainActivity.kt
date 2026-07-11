@@ -100,6 +100,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Hide status bar immediately and use immersive mode
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
+        controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        
+        // Hold splash screen until Compose is ready
+        val content: android.view.View = findViewById(android.R.id.content)
+        var isComposeReady = false
+        content.viewTreeObserver.addOnPreDrawListener(
+            object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    return if (isComposeReady) {
+                        content.viewTreeObserver.removeOnPreDrawListener(this)
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        )
+        
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
@@ -107,8 +129,10 @@ class MainActivity : ComponentActivity() {
         }
 
         checkBatteryOptimizations()
-        enableEdgeToEdge()
+        
+        // Compose is ready after setContent
         setContent {
+            isComposeReady = true
             MyApplicationTheme {
                 Scaffold(modifier = Modifier.fillMaxSize(), containerColor = Color(0xFF0F0F0F)) { innerPadding ->
                     Box(
@@ -141,14 +165,29 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            com.example.WebViewHolder.init(context, musicViewModel)
-                            iPodPlayerApp(
-                                currentUser = currentUser,
-                                onLogout = {
-                                    authViewModel.signOut()
-                                }
-                            )
+                            val hasChosenVibe by musicViewModel.hasChosenVibe.collectAsState()
+                            
+                            if (!hasChosenVibe) {
+                                com.example.ui.screens.ChooseVibeScreen(
+                                    onVibeChosen = { isModern ->
+                                        musicViewModel.setModernMode(isModern)
+                                        musicViewModel.setHasSeenWheelTutorial(false)
+                                        musicViewModel.setHasChosenVibe(true)
+                                        kotlinx.coroutines.GlobalScope.launch {
+                                            com.example.data.remote.FirestoreService.saveUserPreferences(currentUser!!.uid, isModern, false)
+                                        }
+                                    }
+                                )
+                            } else {
+                                val context = androidx.compose.ui.platform.LocalContext.current
+                                com.example.WebViewHolder.init(context, musicViewModel)
+                                iPodPlayerApp(
+                                    currentUser = currentUser,
+                                    onLogout = {
+                                        authViewModel.signOut()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -216,9 +255,25 @@ fun iPodPlayerApp(
 
     LaunchedEffect(currentUser) {
         if (currentUser != null) {
+            // Fetch Vibe Preferences for EVERYONE
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users").document(currentUser.uid).get()
+                .addOnSuccessListener { doc ->
+                    if (doc.exists() && doc.contains("preferredMode")) {
+                        val mode = doc.getString("preferredMode")
+                        val isModern = mode == "modern"
+                        val hasSeenTut = doc.getBoolean("hasSeenWheelTutorial") ?: false
+                        
+                        viewModel.setModernMode(isModern)
+                        viewModel.setHasSeenWheelTutorial(hasSeenTut)
+                        viewModel.setHasChosenVibe(true)
+                    }
+                }
+
+            // Remote Config check for Nicknames
             val mFirebaseRemoteConfig = com.google.firebase.remoteconfig.FirebaseRemoteConfig.getInstance()
             val configSettings = com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings.Builder()
-                .setMinimumFetchIntervalInSeconds(0) // Instant fetch for testing custom messages
+                .setMinimumFetchIntervalInSeconds(0)
                 .build()
             mFirebaseRemoteConfig.setConfigSettingsAsync(configSettings)
             
@@ -227,7 +282,7 @@ fun iPodPlayerApp(
                     if (task.isSuccessful) {
                         val specialUidsStr = mFirebaseRemoteConfig.getString("special_welcome_uids")
                         val specialUidsList = specialUidsStr.split(",").map { it.trim() }
-                        currentUser.uid?.let { uid ->
+                        currentUser.uid.let { uid ->
                             if (specialUidsList.contains(uid)) {
                                 com.google.firebase.firestore.FirebaseFirestore.getInstance()
                                     .collection("users").document(uid).get()
@@ -235,13 +290,12 @@ fun iPodPlayerApp(
                                         if (doc.exists()) {
                                             val newNick = doc.getString("customNickname")?.takeIf { it.isNotBlank() }
                                             val newMsg = doc.getString("customWelcomeMessage")?.takeIf { it.isNotBlank() }
-                                            
                                             if (customNickname != newNick || customWelcomeMessage != newMsg) {
                                                 customNickname = newNick
                                                 customWelcomeMessage = newMsg
                                                 prefs.edit()
-                                                    .putString("customNickname_$uid", newNick)
-                                                    .putString("customWelcomeMessage_$uid", newMsg)
+                                                    .putString("customNickname_${uid}", newNick)
+                                                    .putString("customWelcomeMessage_${uid}", newMsg)
                                                     .apply()
                                             }
                                         }
@@ -347,7 +401,12 @@ fun iPodPlayerApp(
         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
         modifier = Modifier.fillMaxSize()
     ) {
-        ChatRoomFullScreenOverlay(viewModel = viewModel)
+        ChatRoomFullScreenOverlay(
+            viewModel = viewModel,
+            currentUser = currentUser,
+            onLogout = onLogout,
+            customNickname = customNickname
+        )
     }
     
     val isHistoryOpen by viewModel.isHistoryOpen.collectAsState()
@@ -934,16 +993,37 @@ fun iPodScreenDisplay(
                 if (currentScreen == ScreenType.QUEUE) {
                     QueueScreen(viewModel = viewModel)
                 }
-            }
 
-            AnimatedVisibility(
-                visible = isExpanded && currentScreen != ScreenType.NOW_PLAYING,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                MiniYouTubePlayerBar(viewModel = viewModel)
-            }
-            
+                // Floating MiniPlayer with gradient
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isExpanded && 
+                                  currentScreen != ScreenType.NOW_PLAYING && 
+                                  currentScreen != ScreenType.JAMMING &&
+                                  !viewModel.isChatOpen.collectAsState().value,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            // Gradient fade at bottom
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                                        )
+                                    )
+                            )
+                            MiniYouTubePlayerBar(viewModel = viewModel)
+                        }
+                    }
+                }
+            } // End of Box(weight(1f))
             val isModernMode by viewModel.isModernMode.collectAsState()
             if (isModernMode) {
                 Spacer(modifier = Modifier.height(90.dp))
@@ -957,7 +1037,8 @@ fun iPodStatusBar(
     viewModel: MusicPlayerViewModel,
     currentTrack: Track?,
     currentUser: com.google.firebase.auth.FirebaseUser?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    customNickname: String? = null
 ) {
     var showProfileDialog by remember { mutableStateOf(false) }
     val isModernMode by viewModel.isModernMode.collectAsState()
@@ -974,69 +1055,74 @@ fun iPodStatusBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(36.dp)
-            .background(Color.Black.copy(alpha = 0.2f))
-            .padding(horizontal = 10.dp),
+            .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
-            text = "Verse",
+            text = "VERSE",
             color = Color.White.copy(alpha = 0.9f),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 22.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 2.sp
         )
         
-        Spacer(modifier = Modifier.weight(1f))
-        
-        // History Icon
-        IconButton(
-            onClick = { viewModel.isHistoryOpen.value = true },
-            modifier = Modifier.size(36.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Filled.History,
-                contentDescription = "History",
-                tint = Color.White.copy(alpha = 0.9f)
-            )
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        
-        if (currentUser != null) {
-            val photoUrl = currentUser.photoUrl
-            val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } 
-                ?: currentUser.email 
-                ?: "U"
-            
-            Box(
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // History Icon
+            IconButton(
+                onClick = { viewModel.isHistoryOpen.value = true },
                 modifier = Modifier
+                    .size(36.dp)
                     .clip(androidx.compose.foundation.shape.CircleShape)
-                    .clickable { 
-                        showProfileDialog = true 
-                        if (tutState == 5) viewModel.setTutorialState(6)
-                    }
+                    .background(Color.Black.copy(alpha = 0.4f))
             ) {
-                if (photoUrl != null) {
-                    coil.compose.AsyncImage(
-                        model = photoUrl,
-                        contentDescription = "Profile",
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .background(Color.DarkGray),
-                        contentAlignment = Alignment.Center
-                    ) {
+                Icon(
+                    imageVector = Icons.Default.History,
+                    contentDescription = "History",
+                    tint = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // Battery Status Pill
+            if (currentUser != null) {
+                val defaultName = currentUser.displayName?.split(" ")?.firstOrNull() ?: "User"
+                val name = customNickname ?: defaultName
+                
+                com.example.ui.screens.BatteryProfileButton(
+                    nickname = name
+                )
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                // Profile Avatar
+                val photoUrl = currentUser.photoUrl
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable { 
+                            showProfileDialog = true 
+                            if (tutState == 5) viewModel.setTutorialState(6)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (photoUrl != null) {
+                        coil.compose.AsyncImage(
+                            model = photoUrl,
+                            contentDescription = "Profile",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
                         Text(
-                            text = name.first().uppercase(),
+                            text = name.firstOrNull()?.uppercase() ?: "U",
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -1080,7 +1166,8 @@ fun iPodStatusBar(
                     // Profile Section
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val photoUrl = currentUser.photoUrl
-                        val name = currentUser.displayName.takeIf { !it.isNullOrBlank() } ?: currentUser.email ?: "User"
+                        val defaultName = currentUser.displayName?.split(" ")?.firstOrNull() ?: "User"
+                        val name = customNickname ?: defaultName
                         if (photoUrl != null) {
                             coil.compose.AsyncImage(
                                 model = photoUrl,
@@ -2553,7 +2640,10 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
+
+        Spacer(modifier = Modifier.height(150.dp)) // Padding for MiniPlayer and NavBar
     }
 }
 
@@ -2777,7 +2867,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 150.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(likedTracks) { index, track ->
@@ -2884,7 +2974,7 @@ fun PlaylistsScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 150.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Row 0: Create Playlist Trigger
@@ -3262,7 +3352,7 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 150.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 itemsIndexed(songs) { index, track ->
@@ -3450,7 +3540,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(bottom = 150.dp)
             ) {
                 items(genres.size / 2) { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -3495,7 +3585,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                 state = listState,
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(bottom = 150.dp)
             ) {
                 itemsIndexed(results) { index, track ->
                     val isFocused = index == focusedIndex
@@ -3605,7 +3695,7 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 16.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 150.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             itemsIndexed(queue) { index, track ->

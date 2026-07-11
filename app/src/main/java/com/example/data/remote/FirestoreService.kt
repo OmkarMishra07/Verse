@@ -88,6 +88,19 @@ object FirestoreService {
         }
     }
 
+    suspend fun saveUserPreferences(userId: String, isModernMode: Boolean, hasSeenWheelTutorial: Boolean) {
+        try {
+            val data = mapOf(
+                "preferredMode" to if (isModernMode) "modern" else "classic",
+                "hasSeenWheelTutorial" to hasSeenWheelTutorial
+            )
+            userDoc(userId).set(data, SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "saveUserPreferences failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────
     //  Liked Songs
     // ──────────────────────────────────────────────────────────────

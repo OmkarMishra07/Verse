@@ -106,6 +106,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setModernMode(modern: Boolean) {
         _isModernMode.value = modern
         getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("is_modern_mode", modern).apply()
+        if (!modern && !_hasSeenWheelTutorial.value && _hasChosenVibe.value) {
+            setTutorialState(1)
+        }
+    }
+
+    private val _hasChosenVibe = MutableStateFlow(false)
+    val hasChosenVibe = _hasChosenVibe.asStateFlow()
+    fun setHasChosenVibe(chosen: Boolean) {
+        _hasChosenVibe.value = chosen
+        getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("has_chosen_vibe", chosen).apply()
+    }
+
+    private val _hasSeenWheelTutorial = MutableStateFlow(false)
+    val hasSeenWheelTutorial = _hasSeenWheelTutorial.asStateFlow()
+    fun setHasSeenWheelTutorial(seen: Boolean) {
+        _hasSeenWheelTutorial.value = seen
+        val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("has_seen_wheel_tutorial", seen).apply()
+        prefs.edit().putBoolean("tutorial_completed_v4", seen).apply()
     }
 
     private val _currentScreen = MutableStateFlow(ScreenType.EXPLORE)
@@ -135,7 +154,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setTutorialState(state: Int) {
         _tutorialState.value = state
         if (state == 7) {
-            getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("tutorial_completed_v4", true).apply()
+            setHasSeenWheelTutorial(true)
         }
     }
 
@@ -482,8 +501,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE)
-        val completed = prefs.getBoolean("tutorial_completed_v4", false)
-        if (!completed) {
+        _isModernMode.value = prefs.getBoolean("is_modern_mode", false)
+        _hasChosenVibe.value = prefs.getBoolean("has_chosen_vibe", false)
+        _hasSeenWheelTutorial.value = prefs.getBoolean("has_seen_wheel_tutorial", prefs.getBoolean("tutorial_completed_v4", false))
+        
+        val completed = _hasSeenWheelTutorial.value
+        if (!completed && !_isModernMode.value && _hasChosenVibe.value) {
             _tutorialState.value = 1
         } else {
             _tutorialState.value = 7

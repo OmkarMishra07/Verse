@@ -36,14 +36,18 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
+fun ChatRoomFullScreenOverlay(
+    viewModel: MusicPlayerViewModel,
+    currentUser: com.google.firebase.auth.FirebaseUser?,
+    onLogout: () -> Unit,
+    customNickname: String?
+) {
     val jammingRoomId by viewModel.jammingRoomId.collectAsState()
     val roomState by viewModel.jammingRoomState.collectAsState()
     val chatMessages by viewModel.jammingRoomMessages.collectAsState()
     
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
     val myName = remember { currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "User-${(100..999).random()}" }
     
     var chatMsg by remember { mutableStateOf("") }
@@ -113,13 +117,21 @@ fun ChatRoomFullScreenOverlay(viewModel: MusicPlayerViewModel) {
         )
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Header (Balanced)
+            // Global Verse Header
+            com.example.iPodStatusBar(
+                viewModel = viewModel,
+                currentTrack = currentTrack,
+                currentUser = currentUser,
+                onLogout = onLogout,
+                customNickname = customNickname
+            )
+
+            // 1. Chat Sub-Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF161616).copy(alpha = 0.5f))
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .windowInsetsPadding(WindowInsets.statusBars),
+                    .background(Color(0xFF161616).copy(alpha = 0.3f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { viewModel.setIsChatOpen(false) }) {

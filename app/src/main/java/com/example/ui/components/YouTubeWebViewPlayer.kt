@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -206,10 +207,11 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 8.dp) // Match bottom nav side padding
-            .height(64.dp)
-            .clip(RoundedCornerShape(32.dp)) // Pill-shape to match bottom nav
+            .shadow(8.dp, RoundedCornerShape(28.dp), spotColor = Color.Black.copy(alpha = 0.6f)) // Floating shadow
+            .height(56.dp) // Slightly shorter for a lighter feel
+            .clip(RoundedCornerShape(28.dp)) // Pill-shape to match bottom nav
             .background(Color(0xB3000000)) // Frosted glass look
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(28.dp))
             .clickable { 
                 if (jammingRoomId.isNotBlank()) {
                     viewModel.setScreen(com.example.ui.viewmodel.ScreenType.JAMMING)
