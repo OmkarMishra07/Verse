@@ -7,9 +7,11 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -203,8 +205,11 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp) // Match bottom nav side padding
             .height(64.dp)
-            .background(Color(0xFF0D0D0D))
+            .clip(RoundedCornerShape(32.dp)) // Pill-shape to match bottom nav
+            .background(Color(0xB3000000)) // Frosted glass look
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
             .clickable { 
                 if (jammingRoomId.isNotBlank()) {
                     viewModel.setScreen(com.example.ui.viewmodel.ScreenType.JAMMING)
@@ -212,7 +217,7 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
                     viewModel.setScreen(com.example.ui.viewmodel.ScreenType.NOW_PLAYING)
                 }
             }
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         coil.compose.AsyncImage(
@@ -221,7 +226,7 @@ fun MiniYouTubePlayerBar(viewModel: MusicPlayerViewModel) {
             contentScale       = androidx.compose.ui.layout.ContentScale.Crop,
             modifier           = Modifier
                 .size(44.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(CircleShape)
         )
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {

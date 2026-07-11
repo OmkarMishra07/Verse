@@ -218,16 +218,17 @@ fun iPodPlayerApp(
         if (currentUser != null) {
             val mFirebaseRemoteConfig = com.google.firebase.remoteconfig.FirebaseRemoteConfig.getInstance()
             val configSettings = com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings.Builder()
-                .setMinimumFetchIntervalInSeconds(43200) // 12 hours cache
+                .setMinimumFetchIntervalInSeconds(0) // Instant fetch for testing custom messages
                 .build()
             mFirebaseRemoteConfig.setConfigSettingsAsync(configSettings)
             
             mFirebaseRemoteConfig.fetchAndActivate()
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful) {
-                        val specialUids = mFirebaseRemoteConfig.getString("special_welcome_uids")
+                        val specialUidsStr = mFirebaseRemoteConfig.getString("special_welcome_uids")
+                        val specialUidsList = specialUidsStr.split(",").map { it.trim() }
                         currentUser.uid?.let { uid ->
-                            if (specialUids.contains(uid)) {
+                            if (specialUidsList.contains(uid)) {
                                 com.google.firebase.firestore.FirebaseFirestore.getInstance()
                                     .collection("users").document(uid).get()
                                     .addOnSuccessListener { doc ->
@@ -1964,8 +1965,19 @@ fun JammingScreen(
     val durationMs by viewModel.durationMs.collectAsState()
     val hasUnreadMessages by viewModel.hasUnreadMessages.collectAsState()
     val isChatOpen by viewModel.isChatOpen.collectAsState()
-    var showShareDialog by remember { mutableStateOf(false) }
     var showJamSearch by remember { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf(false) }
+    var showParticipantsOverlay by remember { mutableStateOf(false) }
+
+    // Auto-leave if kicked by host
+    LaunchedEffect(roomState, jammingRoomId, myName) {
+        if (jammingRoomId.isNotBlank() && roomState != null) {
+            if (!roomState!!.participants.contains(myName)) {
+                viewModel.setJammingRoomId("")
+                showParticipantsOverlay = false
+            }
+        }
+    }
 
     val chatMessages by viewModel.jammingRoomMessages.collectAsState()
 
@@ -2063,7 +2075,23 @@ fun JammingScreen(
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("${roomState?.hostName ?: "Unknown"}'s Room", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Code: $jammingRoomId", color = iPodAccentBlue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Code: $jammingRoomId", color = iPodAccentBlue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        
+                        val participantsCount = roomState?.participants?.size ?: 0
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E1E1E).copy(alpha = 0.8f),
+                            modifier = Modifier.clickable { showParticipantsOverlay = true }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                Icon(Icons.Default.People, contentDescription = "Participants", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("$participantsCount", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { showJamSearch = !showJamSearch }) {
@@ -2088,21 +2116,6 @@ fun JammingScreen(
             }
             
             val participants = roomState?.participants ?: emptyList()
-            if (participants.isNotEmpty()) {
-                Text("Listeners (${participants.size})", color = Color.Gray, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), fontSize = 12.sp)
-                LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(participants.size) { index ->
-                        val participant = participants[index]
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(modifier = Modifier.size(50.dp).clip(CircleShape).background(Color.DarkGray), contentAlignment = Alignment.Center) {
-                                Text(participant.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(participant, color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(60.dp), textAlign = TextAlign.Center)
-                        }
-                    }
-                }
-            }
             
             if (currentTrack != null) {
                 Column(
@@ -2247,6 +2260,27 @@ fun JammingScreen(
                         }
                     }
                 }
+            }
+        }
+        
+        // Render Participants Overlay
+        AnimatedVisibility(
+            visible = showParticipantsOverlay,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
+        ) {
+            if (roomState != null) {
+                com.example.ui.screens.JammingParticipantsOverlay(
+                    roomState = roomState!!,
+                    myName = myName,
+                    currentTrackThumbnail = currentTrack?.thumbnailUrl,
+                    onClose = { showParticipantsOverlay = false },
+                    onKick = { participantToKick ->
+                        coroutineScope.launch {
+                            com.example.data.remote.JammingService.leaveRoom(jammingRoomId, participantToKick)
+                        }
+                    }
+                )
             }
         }
     } // End of outer Box
@@ -2620,6 +2654,8 @@ fun LibraryScreen(
                 )
             }
         }
+        
+        Spacer(modifier = Modifier.height(16.dp))
 
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().weight(1f)) { page ->
             if (page == 0) {
@@ -2833,6 +2869,7 @@ fun PlaylistsScreen(
     val playlists by viewModel.playlists.collectAsState()
     val focusedIndex by viewModel.focusedIndex.collectAsState()
     val listState = rememberLazyListState()
+    var playlistToDelete by remember { mutableStateOf<com.example.data.local.Playlist?>(null) }
 
     LaunchedEffect(focusedIndex) {
         if (focusedIndex in 0..playlists.size) {
@@ -2996,7 +3033,7 @@ fun PlaylistsScreen(
                         )
                     }
                     IconButton(
-                        onClick = { viewModel.deletePlaylist(playlist.id) },
+                        onClick = { playlistToDelete = playlist },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
@@ -3009,6 +3046,67 @@ fun PlaylistsScreen(
                 }
             }
         }
+    }
+
+    if (playlistToDelete != null) {
+        var typedName by remember { mutableStateOf("") }
+        val isMatch = typedName == playlistToDelete?.name
+        
+        AlertDialog(
+            onDismissRequest = { playlistToDelete = null },
+            title = { Text("Delete Playlist", color = Color.White) },
+            text = {
+                Column {
+                    Text(
+                        "Are you sure you want to delete '${playlistToDelete?.name}'? This cannot be undone.",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "Type the playlist name to confirm:",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = typedName,
+                        onValueChange = { typedName = it },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = if (isMatch) Color.Red else iPodAccentBlue,
+                            unfocusedBorderColor = Color.Gray
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (isMatch) {
+                            playlistToDelete?.let { viewModel.deletePlaylist(it.id) }
+                            playlistToDelete = null
+                        }
+                    },
+                    enabled = isMatch,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = Color.Red,
+                        disabledContentColor = Color.Gray
+                    )
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playlistToDelete = null }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E2633)
+        )
     }
 }
 
