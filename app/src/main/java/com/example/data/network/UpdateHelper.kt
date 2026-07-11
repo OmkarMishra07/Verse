@@ -45,7 +45,8 @@ object UpdateHelper {
             val latestParts = latest.split(".").map { it.toIntOrNull() ?: 0 }
             val currentParts = current.split(".").map { it.toIntOrNull() ?: 0 }
             
-            val maxLength = maxOf(latestParts.size, currentParts.size)
+            // Only compare up to 2 parts (Major and Minor)
+            val maxLength = minOf(2, maxOf(latestParts.size, currentParts.size))
             for (i in 0 until maxLength) {
                 val l = latestParts.getOrElse(i) { 0 }
                 val c = currentParts.getOrElse(i) { 0 }

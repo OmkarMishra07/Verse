@@ -163,10 +163,22 @@ class MainActivity : ComponentActivity() {
                     .setMessage("To prevent the Android system from cutting off music playback in the background, please disable battery optimization for Verse.")
                     .setPositiveButton("Configure") { _, _ ->
                         try {
-                            val intent = android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            // The absolute best way to do this on all Android phones:
+                            // Pops up a direct system dialog asking "Let app always run in background?"
+                            // This flips the master switch for battery optimization (Unrestricted / Allow background activity)
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                            intent.data = android.net.Uri.parse("package:$packageName")
                             startActivity(intent)
                         } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Failed to open settings: ${e.message}")
+                            try {
+                                // If the phone blocks the direct popup (some custom skins do), 
+                                // fallback to the App Info page where the user can click "Battery"
+                                val fallbackIntent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                fallbackIntent.data = android.net.Uri.parse("package:$packageName")
+                                startActivity(fallbackIntent)
+                            } catch (e2: Exception) {
+                                android.util.Log.e("MainActivity", "Failed to open settings: ${e2.message}")
+                            }
                         }
                     }
                     .setNegativeButton("Not Now", null)
@@ -191,12 +203,58 @@ fun iPodPlayerApp(
         showGreeting = false
     }
     
-    val userName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
-    val fullGreeting = if (currentUser?.email == "yaduvanshishambhavi2911@gmail.com") {
-        "Welcome Sunflower \uD83C\uDF3B"
-    } else {
-        "Welcome, $userName."
+    val prefs = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+    
+    var customNickname by remember { 
+        mutableStateOf(prefs.getString("customNickname_${currentUser?.uid}", null)) 
     }
+    var customWelcomeMessage by remember { 
+        mutableStateOf(prefs.getString("customWelcomeMessage_${currentUser?.uid}", null)) 
+    }
+
+    LaunchedEffect(currentUser) {
+        if (currentUser != null) {
+            val mFirebaseRemoteConfig = com.google.firebase.remoteconfig.FirebaseRemoteConfig.getInstance()
+            val configSettings = com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings.Builder()
+                .setMinimumFetchIntervalInSeconds(43200) // 12 hours cache
+                .build()
+            mFirebaseRemoteConfig.setConfigSettingsAsync(configSettings)
+            
+            mFirebaseRemoteConfig.fetchAndActivate()
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        val specialUids = mFirebaseRemoteConfig.getString("special_welcome_uids")
+                        currentUser.uid?.let { uid ->
+                            if (specialUids.contains(uid)) {
+                                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                    .collection("users").document(uid).get()
+                                    .addOnSuccessListener { doc ->
+                                        if (doc.exists()) {
+                                            val newNick = doc.getString("customNickname")?.takeIf { it.isNotBlank() }
+                                            val newMsg = doc.getString("customWelcomeMessage")?.takeIf { it.isNotBlank() }
+                                            
+                                            if (customNickname != newNick || customWelcomeMessage != newMsg) {
+                                                customNickname = newNick
+                                                customWelcomeMessage = newMsg
+                                                prefs.edit()
+                                                    .putString("customNickname_$uid", newNick)
+                                                    .putString("customWelcomeMessage_$uid", newMsg)
+                                                    .apply()
+                                            }
+                                        }
+                                    }
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    val defaultUserName = currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
+    val finalUserName = customNickname ?: defaultUserName
+    val finalWelcomePrefix = customWelcomeMessage ?: "Welcome,"
+    
+    val fullGreeting = "$finalWelcomePrefix $finalUserName."
     
     // Dialog states
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }

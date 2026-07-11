@@ -648,7 +648,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setScreen(screen: ScreenType) {
-        _currentScreen.value = screen
+        if (screen == ScreenType.LIKED) {
+            _currentScreen.value = ScreenType.LIBRARY
+            setLibraryTab(0)
+        } else if (screen == ScreenType.PLAYLISTS) {
+            _currentScreen.value = ScreenType.LIBRARY
+            setLibraryTab(1)
+        } else {
+            _currentScreen.value = screen
+        }
         _focusedIndex.value = 0
         FirebaseCrashlytics.getInstance().setCustomKey("current_screen", screen.name)
     }

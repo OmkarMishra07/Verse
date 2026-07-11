@@ -74,7 +74,9 @@ object FirestoreService {
                     "email"       to (user.email ?: ""),
                     "photoUrl"    to (user.photoUrl?.toString() ?: ""),
                     "createdAt"   to com.google.firebase.Timestamp.now(),
-                    "lastSeen"    to com.google.firebase.Timestamp.now()
+                    "lastSeen"    to com.google.firebase.Timestamp.now(),
+                    "customNickname" to (user.displayName?.split(" ")?.firstOrNull() ?: ""),
+                    "customWelcomeMessage" to "Welcome,"
                 )
                 userDoc(user.uid).set(data).await()
             } else {

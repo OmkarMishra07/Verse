@@ -64,6 +64,10 @@ object WebViewHolder {
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            
+            // Critical for background audio: prevent Chromium from throttling JavaScript timers
+            resumeTimers()
+            keepScreenOn = true
 
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()

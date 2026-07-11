@@ -10,6 +10,7 @@
     <!-- Required by WifiManager.createWifiLock() to keep streaming alive in background -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".VerseApplication"

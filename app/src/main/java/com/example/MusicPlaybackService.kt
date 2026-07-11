@@ -117,6 +117,14 @@ class VerseMusicService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        
+        // Boost thread priority to prevent audio lag during heavy OS transitions (like swiping home)
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+        } catch (e: Exception) {
+            Log.e("VerseMusicService", "Failed to set thread priority: ${e.message}")
+        }
+        
         FirebaseCrashlytics.getInstance().setCustomKey("service_lifecycle_state", "creating")
 
         // Step 1: Create channel BEFORE everything else

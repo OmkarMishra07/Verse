@@ -183,7 +183,6 @@ fun YouTubeWebViewPlayer(
         viewModel.clearSeekRequest()
     }
 
-    // Display the singleton WebView inside this composable slot
     val webView = com.example.WebViewHolder.getWebView()
     if (webView != null) {
         AndroidView(factory = { webView }, modifier = modifier)
