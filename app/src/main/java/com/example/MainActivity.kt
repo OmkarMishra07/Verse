@@ -171,10 +171,10 @@ class MainActivity : ComponentActivity() {
                                 com.example.ui.screens.ChooseVibeScreen(
                                     onVibeChosen = { isModern ->
                                         musicViewModel.setModernMode(isModern)
-                                        musicViewModel.setHasSeenWheelTutorial(false)
+                                        musicViewModel.setHasSeenWheelTutorial(isModern)
                                         musicViewModel.setHasChosenVibe(true)
                                         kotlinx.coroutines.GlobalScope.launch {
-                                            com.example.data.remote.FirestoreService.saveUserPreferences(currentUser!!.uid, isModern, false)
+                                            com.example.data.remote.FirestoreService.saveUserPreferences(currentUser!!.uid, isModern, isModern)
                                         }
                                     }
                                 )
@@ -1037,6 +1037,46 @@ fun iPodScreenDisplay(
 }
 
 @Composable
+fun VerseLogo(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition()
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.5f))
+            .border(
+                width = 1.dp,
+                color = Color.Red.copy(alpha = glowAlpha),
+                shape = RoundedCornerShape(50)
+            )
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "VERSE",
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 2.sp,
+            style = androidx.compose.ui.text.TextStyle(
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = Color.White.copy(alpha = 0.6f),
+                    blurRadius = 6f
+                )
+            )
+        )
+    }
+}
+
+@Composable
 fun iPodStatusBar(
     viewModel: MusicPlayerViewModel,
     currentTrack: Track?,
@@ -1064,13 +1104,7 @@ fun iPodStatusBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(
-            text = "VERSE",
-            color = Color.White.copy(alpha = 0.9f),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 2.sp
-        )
+        VerseLogo(modifier = Modifier.offset(y = 6.dp))
         
         Row(verticalAlignment = Alignment.CenterVertically) {
             // History Icon
@@ -1228,7 +1262,14 @@ fun iPodStatusBar(
                             checked = isModernMode,
                             onCheckedChange = { 
                                 viewModel.setModernMode(it)
-                                if (tutState == 6) viewModel.setTutorialState(7)
+                                if (tutState == 6) {
+                                    viewModel.setTutorialState(7)
+                                    currentUser?.uid?.let { uid ->
+                                        kotlinx.coroutines.GlobalScope.launch {
+                                            com.example.data.remote.FirestoreService.saveUserPreferences(uid, it, true)
+                                        }
+                                    }
+                                }
                             },
                             colors = androidx.compose.material3.SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
@@ -1257,6 +1298,19 @@ fun iPodStatusBar(
 
                     SettingsItemRow(icon = Icons.Default.Info, title = "About Verse", subtitle = "Version $appVersion")
                     
+                    SettingsItemRow(
+                        icon = Icons.Default.PlayArrow,
+                        title = "Restart Tutorial",
+                        subtitle = "Replay the interactive guide",
+                        onClick = {
+                            showProfileDialog = false
+                            if (isModernMode) {
+                                viewModel.setModernMode(false)
+                            }
+                            viewModel.setTutorialState(1)
+                            viewModel.setHasSeenWheelTutorial(false)
+                        }
+                    )
                     Spacer(modifier = Modifier.weight(1f))
                     
                     SettingsItemRow(
