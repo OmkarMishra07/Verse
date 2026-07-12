@@ -1038,38 +1038,92 @@ fun iPodScreenDisplay(
 
 @Composable
 fun VerseLogo(modifier: Modifier = Modifier) {
-    val infiniteTransition = rememberInfiniteTransition()
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
+    val infiniteTransition = rememberInfiniteTransition(label = "neon")
+
+    // Subtle breathing glow pulse (slow and elegant)
+    val glowIntensity by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
+            animation = tween(2400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
-        )
+        ),
+        label = "glow"
     )
+
+    // Very subtle flicker (barely perceptible — like a real neon tube)
+    val flicker by infiniteTransition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(120, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "flicker"
+    )
+
+    val neonRed = Color(0xFFFF2244)
+    val neonPink = Color(0xFFFF6680)
 
     Box(
         modifier = modifier
+            // Outer diffuse glow (the ambient bloom around the pill)
+            .graphicsLayer {
+                alpha = glowIntensity * flicker
+            }
+            .shadow(
+                elevation = (20 * glowIntensity).dp,
+                shape = RoundedCornerShape(50),
+                ambientColor = neonRed.copy(alpha = 0.8f),
+                spotColor = neonRed.copy(alpha = 0.8f)
+            )
             .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.5f))
+            // Deep dark glass background — makes neon pop
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF1A0008).copy(alpha = 0.92f),
+                        Color(0xFF000000).copy(alpha = 0.88f)
+                    )
+                )
+            )
+            // Inner neon border — the "tube" of the neon sign
             .border(
-                width = 1.dp,
-                color = Color.Red.copy(alpha = glowAlpha),
+                width = 1.5.dp,
+                brush = Brush.sweepGradient(
+                    colors = listOf(
+                        neonRed.copy(alpha = glowIntensity),
+                        neonPink.copy(alpha = glowIntensity * 0.7f),
+                        neonRed.copy(alpha = glowIntensity)
+                    )
+                ),
                 shape = RoundedCornerShape(50)
             )
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 18.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Layer 1: Blurred wide glow behind text
         Text(
             text = "VERSE",
-            color = Color.White,
+            color = neonRed.copy(alpha = 0.35f * glowIntensity),
             fontSize = 18.sp,
             fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 2.sp,
+            letterSpacing = 3.sp,
+            modifier = Modifier
+                .blur(8.dp)
+                .graphicsLayer { scaleX = 1.08f; scaleY = 1.08f }
+        )
+        // Layer 2: Sharp bright neon text on top
+        Text(
+            text = "VERSE",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 3.sp,
+            color = Color.White.copy(alpha = flicker),
             style = androidx.compose.ui.text.TextStyle(
                 shadow = androidx.compose.ui.graphics.Shadow(
-                    color = Color.White.copy(alpha = 0.6f),
-                    blurRadius = 6f
+                    color = neonRed.copy(alpha = glowIntensity),
+                    blurRadius = 18f * glowIntensity
                 )
             )
         )
