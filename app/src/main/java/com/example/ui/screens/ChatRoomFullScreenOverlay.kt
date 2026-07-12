@@ -45,6 +45,7 @@ fun ChatRoomFullScreenOverlay(
     val jammingRoomId by viewModel.jammingRoomId.collectAsState()
     val roomState by viewModel.jammingRoomState.collectAsState()
     val chatMessages by viewModel.jammingRoomMessages.collectAsState()
+    val lastSystemEvent by viewModel.lastJamSystemEvent.collectAsState()
     
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
@@ -154,6 +155,24 @@ fun ChatRoomFullScreenOverlay(
                 }
                 IconButton(onClick = { showChatSearch = !showChatSearch }) {
                     Icon(Icons.Default.Search, contentDescription = "Search Song", tint = Color.White)
+                }
+            }
+
+            // Strategy 3: System event banner — sourced from RTDB, zero extra Firestore writes
+            AnimatedVisibility(
+                visible = lastSystemEvent.isNotBlank(),
+                enter = fadeIn() + slideInVertically(),
+                exit = fadeOut() + slideOutVertically()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1A1A2E).copy(alpha = 0.85f))
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text("🎵 $lastSystemEvent", color = Color(0xFF90CAF9), fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -380,13 +399,21 @@ fun ChatRoomFullScreenOverlay(
                             
                             if (msg.reactions.isNotEmpty()) {
                                 Row(modifier = Modifier.padding(top = 2.dp)) {
-                                    msg.reactions.forEach { (emoji, users) ->
-                                        if (users.isNotEmpty()) {
+                                    msg.reactions.forEach { (emoji, usersMap) ->
+                                        // Strategy 5: reactions are now Map<emoji, Map<userId, Boolean>>
+                                        val count = usersMap.values.count { it }
+                                        if (count > 0) {
+                                            val iMeReacted = usersMap[myName] == true
                                             Text(
-                                                "$emoji ${users.size}",
+                                                "$emoji $count",
                                                 fontSize = 11.sp,
-                                                color = Color.White,
-                                                modifier = Modifier.background(Color(0xFF2A2A2A), RoundedCornerShape(12.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
+                                                color = if (iMeReacted) Color(0xFFFFD700) else Color.White,
+                                                modifier = Modifier
+                                                    .background(
+                                                        if (iMeReacted) Color(0xFF3A3000) else Color(0xFF2A2A2A),
+                                                        RoundedCornerShape(12.dp)
+                                                    )
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                         }

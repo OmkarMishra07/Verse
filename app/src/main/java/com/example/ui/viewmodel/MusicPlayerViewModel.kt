@@ -205,6 +205,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     
     private val _jammingRoomMessages = MutableStateFlow<List<com.example.data.remote.ChatMessage>>(emptyList())
     val jammingRoomMessages = _jammingRoomMessages.asStateFlow()
+
+    // Strategy 3: last system event (song changed / play / pause) surfaced from RTDB state
+    private val _lastJamSystemEvent = MutableStateFlow("")
+    val lastJamSystemEvent = _lastJamSystemEvent.asStateFlow()
     
     fun setJammingRoomId(roomId: String) {
         _jammingRoomId.value = roomId
@@ -212,16 +216,20 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private var lastLocalActionTime = 0L
 
-    fun pushJammingState() {
+    /**
+     * Pushes playback state to RTDB (fire-and-forget, no coroutine needed).
+     * [systemEvent] is embedded in RTDB state (Strategy 3) so no separate
+     * Firestore message document is created.
+     */
+    fun pushJammingState(systemEvent: String = "") {
         val roomId = _jammingRoomId.value
-        val track = _currentTrack.value
+        val track  = _currentTrack.value
         if (roomId.isNotBlank() && track != null) {
             lastLocalActionTime = System.currentTimeMillis()
-            viewModelScope.launch {
-                com.example.data.remote.JammingService.updateRoomState(
-                    roomId, track, _isPlaying.value, _currentPositionMs.value
-                )
-            }
+            // updateRoomState is now fire-and-forget (RTDB), no coroutine needed
+            com.example.data.remote.JammingService.updateRoomState(
+                roomId, track, _isPlaying.value, _currentPositionMs.value, systemEvent
+            )
         }
     }
 
@@ -599,6 +607,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                             _jammingRoomState.value = room
                             if (room != null) {
                                 syncFromRemote(room)
+                                // Strategy 3: update system event banner from RTDB state
+                                if (room.lastSystemEvent.isNotBlank()) {
+                                    _lastJamSystemEvent.value = room.lastSystemEvent
+                                }
                             }
                         }
                     }
@@ -777,15 +789,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             lastTrackChangeTime = System.currentTimeMillis()
             _playTrigger.value += 1
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
-            pushJammingState()
-            
-            val roomId = _jammingRoomId.value
-            if (roomId.isNotBlank()) {
-                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
-                viewModelScope.launch {
-                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName changed the song to ${resolved.title}")
-                }
-            }
+            pushJammingState(
+                systemEvent = if (_jammingRoomId.value.isNotBlank()) {
+                    val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+                    "$userName changed the song to ${resolved.title}"
+                } else ""
+            )
 
             // Prefetch lyrics in the background so they are instantly available when the user clicks the Lyrics button
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -952,15 +961,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
         _isPlaying.value = playing
         if (fromUser) {
-            pushJammingState()
-            val roomId = _jammingRoomId.value
-            if (roomId.isNotBlank()) {
-                val action = if (playing) "resumed" else "paused"
-                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
-                viewModelScope.launch {
-                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName $action the playback")
-                }
-            }
+            val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+            val action = if (playing) "resumed" else "paused"
+            val event = if (_jammingRoomId.value.isNotBlank()) "$userName $action the playback" else ""
+            pushJammingState(systemEvent = event)
         }
     }
 
@@ -1153,6 +1157,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 songDao.insertPlaylistSong(song)
                 currentUserId?.let { uid ->
                     com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, song)
+                    // Touch parent ONCE after song write (saves 1 write vs doing it inside upsertPlaylistSong)
+                    com.example.data.remote.FirestoreService.touchPlaylist(uid, playlistId)
                 }
             }
         }
@@ -1184,6 +1190,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     currentUserId?.let { uid ->
                         com.example.data.remote.FirestoreService.upsertPlaylistSong(uid, updated)
                     }
+                }
+                // Touch parent ONCE after all song writes (saves N-1 writes vs touching inside each upsert)
+                currentUserId?.let { uid ->
+                    com.example.data.remote.FirestoreService.touchPlaylist(uid, playlistId)
                 }
             }
         }

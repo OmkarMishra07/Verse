@@ -273,11 +273,22 @@ object FirestoreService {
                 "displayOrder" to song.displayOrder
             )
             playlistSongsCol(userId, song.playlistId).document(song.videoId).set(data).await()
-            // Touch parent playlist so it gets picked up by Delta Sync
-            val parentUpdate = mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())
-            playlistsCol(userId).document(song.playlistId.toString()).set(parentUpdate, com.google.firebase.firestore.SetOptions.merge()).await()
+            // NOTE: parent playlist "touch" is NOT done here.
+            // Callers must call touchPlaylist() once after batching all song writes.
         } catch (e: Exception) {
             Log.e(TAG, "upsertPlaylistSong failed: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
+        }
+    }
+
+    /** Touches the parent playlist's updatedAt so delta sync picks it up.
+     *  Call this ONCE after a batch of upsertPlaylistSong / deletePlaylistSong calls. */
+    suspend fun touchPlaylist(userId: String, playlistId: Long) {
+        try {
+            val parentUpdate = mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())
+            playlistsCol(userId).document(playlistId.toString()).set(parentUpdate, SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "touchPlaylist failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
         }
     }
@@ -285,9 +296,8 @@ object FirestoreService {
     suspend fun deletePlaylistSong(userId: String, playlistId: Long, videoId: String) {
         try {
             playlistSongsCol(userId, playlistId).document(videoId).delete().await()
-            // Touch parent playlist so it gets picked up by Delta Sync
-            val parentUpdate = mapOf("updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp())
-            playlistsCol(userId).document(playlistId.toString()).set(parentUpdate, com.google.firebase.firestore.SetOptions.merge()).await()
+            // Touch parent playlist once after delete so delta sync picks it up
+            touchPlaylist(userId, playlistId)
         } catch (e: Exception) {
             Log.e(TAG, "deletePlaylistSong failed: ${e.message}")
             FirebaseCrashlytics.getInstance().recordException(e)
