@@ -55,7 +55,8 @@ data class ChatMessage(
 
 object JammingService {
     private val db   = FirebaseFirestore.getInstance()
-    private val rtdb = FirebaseDatabase.getInstance()
+    // Hardcoded RTDB URL because google-services.json doesn't include firebase_database_url
+    private val rtdb = FirebaseDatabase.getInstance("https://verse-d9583-default-rtdb.asia-southeast1.firebasedatabase.app")
     private const val TAG = "JammingService"
 
     // Firestore — persistent room metadata and chat only
@@ -92,6 +93,8 @@ object JammingService {
                 "participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName),
                 "lastActivityTimestamp", com.google.firebase.Timestamp.now()
             ).await()
+            // Mirror participants in RTDB so listenToRoom() can include them in JammingRoom
+            rtdbStateRef(roomId).child("participants/$participantName").setValue(true)
             // Join/leave messages stay in Firestore — they are important persistent events
             sendMessage(roomId, "System", "$participantName joined the jam 🎵", isSystemMessage = true)
             true
@@ -109,7 +112,8 @@ object JammingService {
             ).await()
             // Leave messages stay in Firestore — important persistent events
             sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
-            // Clean up RTDB typing ref on leave
+            // Remove from RTDB participants map and typing ref
+            rtdbStateRef(roomId).child("participants/$participantName").removeValue()
             rtdb.getReference("jamming_rooms/$roomId/typing/$participantName").removeValue()
             true
         } catch (e: Exception) {
@@ -172,17 +176,22 @@ object JammingService {
                     trySend(null)
                     return
                 }
+                // Read participants from RTDB map { userName: true }
+                val participants = snapshot.child("participants").children
+                    .mapNotNull { it.key }
+                    .toList()
                 val room = JammingRoom(
-                    roomId               = roomId,
-                    currentTrackId       = snapshot.child("currentTrackId").getValue(String::class.java) ?: "",
-                    currentTrackTitle    = snapshot.child("currentTrackTitle").getValue(String::class.java) ?: "",
-                    currentTrackArtist   = snapshot.child("currentTrackArtist").getValue(String::class.java) ?: "",
+                    roomId                = roomId,
+                    currentTrackId        = snapshot.child("currentTrackId").getValue(String::class.java) ?: "",
+                    currentTrackTitle     = snapshot.child("currentTrackTitle").getValue(String::class.java) ?: "",
+                    currentTrackArtist    = snapshot.child("currentTrackArtist").getValue(String::class.java) ?: "",
                     currentTrackThumbnail = snapshot.child("currentTrackThumbnail").getValue(String::class.java) ?: "",
-                    currentTrackDuration = snapshot.child("currentTrackDuration").getValue(String::class.java) ?: "",
-                    playing              = snapshot.child("playing").getValue(Boolean::class.java) ?: false,
-                    positionMs           = snapshot.child("positionMs").getValue(Long::class.java) ?: 0L,
-                    updatedAt            = snapshot.child("updatedAt").getValue(Long::class.java) ?: System.currentTimeMillis(),
-                    lastSystemEvent      = snapshot.child("lastSystemEvent").getValue(String::class.java) ?: ""
+                    currentTrackDuration  = snapshot.child("currentTrackDuration").getValue(String::class.java) ?: "",
+                    playing               = snapshot.child("playing").getValue(Boolean::class.java) ?: false,
+                    positionMs            = snapshot.child("positionMs").getValue(Long::class.java) ?: 0L,
+                    updatedAt             = snapshot.child("updatedAt").getValue(Long::class.java) ?: System.currentTimeMillis(),
+                    lastSystemEvent       = snapshot.child("lastSystemEvent").getValue(String::class.java) ?: "",
+                    participants          = participants
                 )
                 trySend(room)
             }
