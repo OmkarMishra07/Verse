@@ -392,7 +392,8 @@ fun iPodPlayerApp(
         onAddTrackToPlaylist = { playlistToAddTo = it },
         onShowLyrics = { showLyricsDialog = true },
         currentUser = currentUser,
-        onLogout = onLogout
+        onLogout = onLogout,
+        customNickname = finalUserName
     )
 
     AnimatedVisibility(
@@ -598,7 +599,8 @@ fun iPodDeviceFrame(
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
     currentUser: com.google.firebase.auth.FirebaseUser?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    customNickname: String
 ) {
     val displayWeight = 1.2f
     val wheelSpacing = 12.dp
@@ -634,7 +636,8 @@ fun iPodDeviceFrame(
                 onAddTrackToPlaylist = onAddTrackToPlaylist,
                 onShowLyrics = onShowLyrics,
                 currentUser = currentUser,
-                onLogout = onLogout
+                onLogout = onLogout,
+                customNickname = customNickname
             )
     
             AnimatedVisibility(
@@ -829,7 +832,8 @@ fun iPodScreenDisplay(
     onAddTrackToPlaylist: (Track) -> Unit,
     onShowLyrics: () -> Unit,
     currentUser: com.google.firebase.auth.FirebaseUser?,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    customNickname: String
 ) {
     val coroutineScope = rememberCoroutineScope()
     val currentTrack by viewModel.currentTrack.collectAsState()
@@ -925,7 +929,7 @@ fun iPodScreenDisplay(
         )
 
         Column(modifier = Modifier.fillMaxSize()) {
-            iPodStatusBar(viewModel, currentTrack, currentUser, onLogout)
+            iPodStatusBar(viewModel, currentTrack, currentUser, onLogout, customNickname)
 
             Box(modifier = Modifier.size(1.dp).alpha(0f)) {
                 YouTubeWebViewPlayer(

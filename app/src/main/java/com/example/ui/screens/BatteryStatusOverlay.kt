@@ -100,77 +100,96 @@ fun BatteryProfileButton(
 }
 
 @Composable
+fun RetroDigitalClock() {
+    var currentTime by remember { mutableStateOf(java.util.Calendar.getInstance().time) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            currentTime = java.util.Calendar.getInstance().time
+        }
+    }
+    
+    val formatter = remember { java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault()) }
+    val timeString = formatter.format(currentTime)
+    
+    Text(
+        text = timeString,
+        color = Color(0xFF00FF00),
+        fontSize = 28.sp,
+        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        style = androidx.compose.ui.text.TextStyle(
+            shadow = androidx.compose.ui.graphics.Shadow(
+                color = Color(0xFF00FF00).copy(alpha = 0.5f),
+                offset = androidx.compose.ui.geometry.Offset(0f, 0f),
+                blurRadius = 8f
+            )
+        )
+    )
+}
+
+@Composable
 fun BatteryStatusOverlay(
     batteryPct: Int,
     nickname: String,
     onDismiss: () -> Unit
 ) {
-    AnimatedVisibility(
-        visible = true,
-        enter = fadeIn(),
-        exit = fadeOut(),
-        modifier = Modifier.zIndex(100f)
-    ) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.8f))
-                .clickable { onDismiss() },
+                .padding(16.dp)
+                .clip(RoundedCornerShape(32.dp))
+                .background(Color(0xFF1E1E1E).copy(alpha = 0.95f))
+                .border(2.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
+                .padding(32.dp),
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .padding(32.dp)
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xFF1E1E1E).copy(alpha = 0.9f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(32.dp))
-                    .clickable(enabled = false) {} // block clicks from dismissing
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Battery Graphic
+                Box(
+                    modifier = Modifier
+                        .width(80.dp)
+                        .height(160.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(3.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.BottomCenter
                 ) {
-                    // Battery Graphic
                     Box(
                         modifier = Modifier
-                            .width(80.dp)
-                            .height(160.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(3.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(12.dp)),
-                        contentAlignment = Alignment.BottomCenter
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(batteryPct / 100f)
-                                .background(if (batteryPct > 20) Color(0xFF4CAF50) else Color(0xFFF44336))
-                        )
-                    }
-                    // Battery Tip
-                    Box(
-                        modifier = Modifier
-                            .offset(y = (-168).dp)
-                            .width(30.dp)
-                            .height(8.dp)
-                            .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text(
-                        text = "Hey ${nickname.takeIf { it.isNotBlank() } ?: "there"},",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Your battery percentage is $batteryPct%",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 16.sp
+                            .fillMaxWidth()
+                            .fillMaxHeight(batteryPct / 100f)
+                            .background(if (batteryPct > 20) Color(0xFF4CAF50) else Color(0xFFF44336))
                     )
                 }
+                // Battery Tip
+                Box(
+                    modifier = Modifier
+                        .offset(y = (-168).dp)
+                        .width(30.dp)
+                        .height(8.dp)
+                        .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Hey ${nickname.takeIf { it.isNotBlank() } ?: "there"},",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Your battery percentage is $batteryPct%",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 16.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                RetroDigitalClock()
             }
         }
     }
