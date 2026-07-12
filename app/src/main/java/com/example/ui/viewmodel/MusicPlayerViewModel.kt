@@ -234,15 +234,20 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun syncFromRemote(state: com.example.data.remote.JammingRoom) {
-        // If the incoming remote state is older than or equal to our last local action, 
+        // If the incoming remote state is older than or equal to our last local action,
         // it means this is either an echo of our own action or an outdated event due to network delay.
         // We ignore it to prevent jitter.
-        if (state.updatedAt <= lastLocalActionTime) return
-        
+        if (state.updatedAt <= lastLocalActionTime) {
+            android.util.Log.d("JamSync", "Ignored echo: updatedAt=${state.updatedAt} <= lastLocal=$lastLocalActionTime")
+            return
+        }
+
+        android.util.Log.d("JamSync", "syncFromRemote: track=${state.currentTrackId.take(8)}, playing=${state.playing}, pos=${state.positionMs}ms")
+
         if (_isPlaying.value != state.playing) {
             _isPlaying.value = state.playing
         }
-        
+
         val current = _currentTrack.value
         var trackChanged = false
         if (state.currentTrackId.isNotBlank() && (current == null || current.id != state.currentTrackId)) {
@@ -251,11 +256,14 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _playTrigger.value += 1
             trackChanged = true
             lastTrackChangeTime = System.currentTimeMillis()
+            android.util.Log.d("JamSync", "Track changed to: ${state.currentTrackTitle}")
         }
-        
+
         val elapsed = System.currentTimeMillis() - state.updatedAt
         val expectedMs = if (state.playing) state.positionMs + elapsed else state.positionMs
-        if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 3000) {
+        // Reduced threshold: 500ms instead of 3000ms for tighter sync on seeks
+        if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 500) {
+            android.util.Log.d("JamSync", "Seeking to ${expectedMs}ms (elapsed=${elapsed}ms, diff=${Math.abs(_currentPositionMs.value - expectedMs)}ms)")
             _currentPositionMs.value = expectedMs
             _seekRequestMs.value = expectedMs
         }
@@ -412,7 +420,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private var lastTrackChangeTime = 0L
     private var lastSeekTargetMs = -1L
 
-    fun seekTo(positionMs: Long) {
+    fun seekTo(positionMs: Long, fromUser: Boolean = false) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
         lastSeekTime = System.currentTimeMillis()
@@ -426,7 +434,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 _isLoading.value = true
             }
         }
-        pushJammingState()
+        // Only push to RTDB if this is a user-initiated seek, NOT a remote sync
+        if (fromUser) pushJammingState()
     }
 
 

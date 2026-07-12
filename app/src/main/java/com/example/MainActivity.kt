@@ -584,7 +584,7 @@ fun iPodPlayerApp(
             track = currentTrack,
             currentPositionMs = currentPositionMs,
             onDismissRequest = { showLyricsDialog = false },
-            onSeek = { ms -> viewModel.seekTo(ms) }
+            onSeek = { ms -> viewModel.seekTo(ms, fromUser = true) }
         )
     }
 }
@@ -1467,7 +1467,7 @@ fun SeekBar(
                 stateDescription = "${formatMs(progressMs)} of ${formatMs(durationMs)}"
                 setProgress { targetValue ->
                     val targetMs = targetValue.toLong().coerceIn(0L, durationMs)
-                    viewModel.seekTo(targetMs)
+                    viewModel.seekTo(targetMs, fromUser = true)
                     true
                 }
             }
@@ -1477,11 +1477,11 @@ fun SeekBar(
                     when (keyEvent.key) {
                         Key.DirectionLeft -> {
                             val t = (progressMs - stepMs).coerceAtLeast(0L)
-                            viewModel.seekTo(t); true
+                            viewModel.seekTo(t, fromUser = true); true
                         }
                         Key.DirectionRight -> {
                             val t = (progressMs + stepMs).coerceAtMost(durationMs)
-                            viewModel.seekTo(t); true
+                            viewModel.seekTo(t, fromUser = true); true
                         }
                         else -> false
                     }
@@ -1510,12 +1510,12 @@ fun SeekBar(
                         onDragEnd = {
                             val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
                             isDragging = false
-                            viewModel.seekTo(seekMs)
+                            viewModel.seekTo(seekMs, fromUser = true)
                         },
                         onDragCancel = {
                             val seekMs = (dragFraction * durationMs).toLong().coerceIn(0L, durationMs)
                             isDragging = false
-                            viewModel.seekTo(seekMs)
+                            viewModel.seekTo(seekMs, fromUser = true)
                         }
                     )
                 }
@@ -1525,7 +1525,7 @@ fun SeekBar(
                             if (durationMs > 0 && widthPx > 0) {
                                 val fraction = (offset.x / widthPx).coerceIn(0f, 1f)
                                 val seekMs = (fraction * durationMs).toLong().coerceIn(0L, durationMs)
-                                viewModel.seekTo(seekMs)
+                                viewModel.seekTo(seekMs, fromUser = true)
                                 focusRequester.requestFocus()
                             }
                         }

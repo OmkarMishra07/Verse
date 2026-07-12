@@ -156,8 +156,14 @@ object JammingService {
             if (systemEvent.isNotBlank()) {
                 state["lastSystemEvent"] = systemEvent
             }
-            // Fire-and-forget RTDB write — no coroutine needed, no await
-            rtdbStateRef(roomId).updateChildren(state)
+            // Fire-and-forget RTDB write with failure logging
+            rtdbStateRef(roomId).updateChildren(state) { error, _ ->
+                if (error != null) {
+                    Log.e(TAG, "RTDB updateRoomState failed: ${error.message} (code: ${error.code})")
+                } else {
+                    Log.d(TAG, "RTDB state pushed: playing=${isPlaying}, pos=${positionMs}ms, track=${track?.title?.take(20)}")
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "updateRoomState (RTDB) failed", e)
         }
