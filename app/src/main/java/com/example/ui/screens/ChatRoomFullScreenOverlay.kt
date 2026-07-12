@@ -53,6 +53,7 @@ fun ChatRoomFullScreenOverlay(
     var chatMsg by remember { mutableStateOf("") }
     var replyToMsg by remember { mutableStateOf<com.example.data.remote.ChatMessage?>(null) }
     var showChatSearch by remember { mutableStateOf(false) }
+    var showParticipantsOverlay by remember { mutableStateOf(false) }
     
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -153,6 +154,24 @@ fun ChatRoomFullScreenOverlay(
                         fontWeight = FontWeight.Medium
                     )
                 }
+                
+                val count = roomState?.participants?.size ?: 0
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White.copy(alpha = 0.1f),
+                    modifier = Modifier.clickable { showParticipantsOverlay = true }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically, 
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.People, contentDescription = "Participants", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("$count/10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+
                 IconButton(onClick = { showChatSearch = !showChatSearch }) {
                     Icon(Icons.Default.Search, contentDescription = "Search Song", tint = Color.White)
                 }
@@ -481,6 +500,20 @@ fun ChatRoomFullScreenOverlay(
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send", tint = if (chatMsg.isNotBlank()) Color.White else Color.Gray, modifier = Modifier.size(20.dp).offset(x = 2.dp))
                 }
+            }
+
+            if (showParticipantsOverlay && roomState != null) {
+                JammingParticipantsOverlay(
+                    roomState = roomState!!,
+                    myName = myName,
+                    currentTrackThumbnail = currentTrack?.thumbnailUrl,
+                    onClose = { showParticipantsOverlay = false },
+                    onKick = { participantToKick ->
+                        coroutineScope.launch {
+                            com.example.data.remote.JammingService.leaveRoom(jammingRoomId, participantToKick)
+                        }
+                    }
+                )
             }
         }
     }
