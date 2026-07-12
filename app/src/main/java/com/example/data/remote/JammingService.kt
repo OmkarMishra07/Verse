@@ -13,16 +13,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data Models
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Data Models (identical to GOATU) ────────────────────────────────────────
 
 data class JammingRoom(
     val roomId: String = "",
     val hostId: String = "",
     val hostName: String = "",
-    // NOTE: playback fields below are now sourced from RTDB, not Firestore.
-    // They are kept here so syncFromRemote() in the ViewModel can stay unchanged.
     val currentTrackId: String = "",
     val currentTrackTitle: String = "",
     val currentTrackArtist: String = "",
@@ -32,9 +28,7 @@ data class JammingRoom(
     val positionMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
     val participants: List<String> = emptyList(),
-    val lastActivityTimestamp: com.google.firebase.Timestamp? = null,
-    // Strategy 3: last system event embedded in state instead of a message doc
-    val lastSystemEvent: String = ""
+    val lastActivityTimestamp: com.google.firebase.Timestamp? = null
 )
 
 data class ChatMessage(
@@ -43,32 +37,26 @@ data class ChatMessage(
     val message: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val replyToMessageId: String? = null,
-    // Strategy 5: reactions stored as Map<emoji, Map<userId, Boolean>>
-    // This allows direct dot-notation field updates without transactions
-    val reactions: Map<String, Map<String, Boolean>> = emptyMap(),
+    val reactions: Map<String, List<String>> = emptyMap(), // GOATU format
     val isSystemMessage: Boolean = false
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// JammingService
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── JammingService ───────────────────────────────────────────────────────────
 
 object JammingService {
     private val db   = FirebaseFirestore.getInstance()
-    // Hardcoded RTDB URL because google-services.json doesn't include firebase_database_url
+    // RTDB URL hardcoded because google-services.json doesn't include firebase_database_url
     private val rtdb = FirebaseDatabase.getInstance("https://verse-d9583-default-rtdb.asia-southeast1.firebasedatabase.app")
     private const val TAG = "JammingService"
 
-    // Firestore — persistent room metadata and chat only
-    private fun roomsCol()                         = db.collection("jamming_rooms")
-    private fun messagesCol(roomId: String)         = roomsCol().document(roomId).collection("messages")
+    // Firestore — room metadata (participants, host) + chat messages
+    private fun roomsCol()                       = db.collection("jamming_rooms")
+    private fun messagesCol(roomId: String)       = roomsCol().document(roomId).collection("messages")
 
-    // RTDB — real-time playback state (Strategy 1)
-    private fun rtdbStateRef(roomId: String)        = rtdb.getReference("jamming_rooms/$roomId/state")
+    // RTDB — real-time playback state only (replaces Firestore room doc for state fields)
+    private fun rtdbStateRef(roomId: String)      = rtdb.getReference("jamming_rooms/$roomId/state")
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Room Lifecycle  (Firestore — participants + metadata only)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Room Lifecycle ───────────────────────────────────────────────────────
 
     suspend fun createRoom(roomId: String, hostId: String, hostName: String): Boolean {
         return try {
@@ -79,7 +67,13 @@ object JammingService {
                 participants = listOf(hostName),
                 lastActivityTimestamp = com.google.firebase.Timestamp.now()
             )
+            // Firestore — persistent room metadata
             roomsCol().document(roomId).set(room).await()
+            // RTDB — seed participants + hostName so listenToRoom can serve kick-out check
+            rtdbStateRef(roomId).updateChildren(mapOf<String, Any>(
+                "hostName" to hostName,
+                "participants/${hostName}" to true
+            ))
             true
         } catch (e: Exception) {
             Log.e(TAG, "createRoom failed", e)
@@ -87,20 +81,43 @@ object JammingService {
         }
     }
 
-    suspend fun joinRoom(roomId: String, participantName: String): Boolean {
+    suspend fun joinRoom(roomId: String, participantName: String): String {
+        val roomRef = roomsCol().document(roomId)
         return try {
-            roomsCol().document(roomId).update(
-                "participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName),
-                "lastActivityTimestamp", com.google.firebase.Timestamp.now()
-            ).await()
-            // Mirror participants in RTDB so listenToRoom() can include them in JammingRoom
-            rtdbStateRef(roomId).child("participants/$participantName").setValue(true)
-            // Join/leave messages stay in Firestore — they are important persistent events
-            sendMessage(roomId, "System", "$participantName joined the jam 🎵", isSystemMessage = true)
-            true
+            val result = db.runTransaction { transaction ->
+                val snapshot = transaction.get(roomRef)
+                if (!snapshot.exists()) {
+                    return@runTransaction "NOT_FOUND"
+                }
+                val room = snapshot.toObject(JammingRoom::class.java)
+                val participants = room?.participants ?: emptyList()
+                
+                // If they are already in the list, allow seamless rejoin
+                if (participants.contains(participantName)) {
+                    return@runTransaction "SUCCESS"
+                }
+                
+                if (participants.size >= 10) {
+                    return@runTransaction "FULL"
+                }
+                
+                transaction.update(
+                    roomRef,
+                    "participants", com.google.firebase.firestore.FieldValue.arrayUnion(participantName),
+                    "lastActivityTimestamp", com.google.firebase.Timestamp.now()
+                )
+                "SUCCESS"
+            }.await()
+            
+            if (result == "SUCCESS") {
+                // Mirror participant in RTDB for kick-out check in listenToRoom
+                rtdbStateRef(roomId).child("participants/$participantName").setValue(true)
+                sendMessage(roomId, "System", "$participantName joined the jam", isSystemMessage = true)
+            }
+            result
         } catch (e: Exception) {
             Log.e(TAG, "joinRoom failed", e)
-            false
+            "ERROR"
         }
     }
 
@@ -110,9 +127,8 @@ object JammingService {
                 "participants", com.google.firebase.firestore.FieldValue.arrayRemove(participantName),
                 "lastActivityTimestamp", com.google.firebase.Timestamp.now()
             ).await()
-            // Leave messages stay in Firestore — important persistent events
             sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
-            // Remove from RTDB participants map and typing ref
+            // Clean up RTDB
             rtdbStateRef(roomId).child("participants/$participantName").removeValue()
             rtdb.getReference("jamming_rooms/$roomId/typing/$participantName").removeValue()
             true
@@ -122,72 +138,61 @@ object JammingService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Strategy 1: Playback state → RTDB (zero Firestore reads/writes)
-    // Strategy 3: System event embedded in RTDB state (no separate message doc)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Playback State → RTDB (replaces Firestore writes) ───────────────────
 
     /**
-     * Pushes real-time playback state to RTDB instead of Firestore.
-     * [systemEvent] — optional text like "Prince changed the song to X" embedded
-     * directly in the state object (Strategy 3). No separate Firestore message
-     * document is created, saving 1 write per event.
+     * Writes real-time playback state to RTDB instead of Firestore.
+     * Fire-and-forget — no suspend, no await needed.
+     * Saves ~4-6 Firestore writes/min per user during jam sessions.
      */
-    fun updateRoomState(
-        roomId: String,
-        track: Track?,
-        isPlaying: Boolean,
-        positionMs: Long,
-        systemEvent: String = ""
-    ) {
+    fun updateRoomState(roomId: String, track: Track?, isPlaying: Boolean, positionMs: Long) {
         try {
             val state = mutableMapOf<String, Any>(
-                "playing"       to isPlaying,
-                "positionMs"    to positionMs,
-                "updatedAt"     to System.currentTimeMillis()
+                "playing"    to isPlaying,
+                "positionMs" to positionMs,
+                "updatedAt"  to System.currentTimeMillis()
             )
             track?.let {
-                state["currentTrackId"]       = it.id
-                state["currentTrackTitle"]    = it.title
-                state["currentTrackArtist"]   = it.artist
+                state["currentTrackId"]        = it.id
+                state["currentTrackTitle"]     = it.title
+                state["currentTrackArtist"]    = it.artist
                 state["currentTrackThumbnail"] = it.thumbnailUrl
-                state["currentTrackDuration"] = it.duration
+                state["currentTrackDuration"]  = it.duration
             }
-            if (systemEvent.isNotBlank()) {
-                state["lastSystemEvent"] = systemEvent
-            }
-            // Fire-and-forget RTDB write with failure logging
             rtdbStateRef(roomId).updateChildren(state) { error, _ ->
                 if (error != null) {
-                    Log.e(TAG, "RTDB updateRoomState failed: ${error.message} (code: ${error.code})")
+                    Log.e(TAG, "RTDB updateRoomState failed: ${error.message}")
                 } else {
-                    Log.d(TAG, "RTDB state pushed: playing=${isPlaying}, pos=${positionMs}ms, track=${track?.title?.take(20)}")
+                    Log.d(TAG, "RTDB state pushed: playing=$isPlaying pos=${positionMs}ms")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "updateRoomState (RTDB) failed", e)
+            Log.e(TAG, "updateRoomState failed", e)
         }
     }
 
+    // ─── Room Listener → RTDB (replaces Firestore snapshot listener) ─────────
+
     /**
-     * Listens to RTDB for real-time playback state changes.
-     * Returns a Flow<JammingRoom?> with the same shape as before so
-     * ViewModel's syncFromRemote() works without any changes.
+     * Listens to RTDB for real-time playback state.
+     * Returns a Flow<JammingRoom?> with same shape as before so ViewModel is unchanged.
      */
     fun listenToRoom(roomId: String): Flow<JammingRoom?> = callbackFlow {
-        val ref = rtdbStateRef(roomId)
+        val ref      = rtdbStateRef(roomId)
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) {
                     trySend(null)
                     return
                 }
-                // Read participants from RTDB map { userName: true }
+                // Participants stored as { userName: true } map in RTDB
                 val participants = snapshot.child("participants").children
                     .mapNotNull { it.key }
                     .toList()
+
                 val room = JammingRoom(
                     roomId                = roomId,
+                    hostName              = snapshot.child("hostName").getValue(String::class.java) ?: "",
                     currentTrackId        = snapshot.child("currentTrackId").getValue(String::class.java) ?: "",
                     currentTrackTitle     = snapshot.child("currentTrackTitle").getValue(String::class.java) ?: "",
                     currentTrackArtist    = snapshot.child("currentTrackArtist").getValue(String::class.java) ?: "",
@@ -196,9 +201,9 @@ object JammingService {
                     playing               = snapshot.child("playing").getValue(Boolean::class.java) ?: false,
                     positionMs            = snapshot.child("positionMs").getValue(Long::class.java) ?: 0L,
                     updatedAt             = snapshot.child("updatedAt").getValue(Long::class.java) ?: System.currentTimeMillis(),
-                    lastSystemEvent       = snapshot.child("lastSystemEvent").getValue(String::class.java) ?: "",
                     participants          = participants
                 )
+                Log.d(TAG, "RTDB room update: track=${room.currentTrackId.take(8)}, playing=${room.playing}, pos=${room.positionMs}ms, participants=$participants")
                 trySend(room)
             }
             override fun onCancelled(error: DatabaseError) {
@@ -210,9 +215,7 @@ object JammingService {
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Chat Messages  (Firestore — persistent)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Chat Messages (Firestore — identical to GOATU) ──────────────────────
 
     suspend fun sendMessage(
         roomId: String,
@@ -222,14 +225,14 @@ object JammingService {
         isSystemMessage: Boolean = false
     ) {
         try {
-            val docRef = messagesCol(roomId).document()
-            val isSys  = isSystemMessage || senderName == "System"
+            val docRef  = messagesCol(roomId).document()
+            val msgSys  = isSystemMessage || senderName == "System"
             val chatMsg = ChatMessage(
-                id                = docRef.id,
-                senderName        = senderName,
-                message           = message,
-                replyToMessageId  = replyToMessageId,
-                isSystemMessage   = isSys
+                id               = docRef.id,
+                senderName       = senderName,
+                message          = message,
+                replyToMessageId = replyToMessageId,
+                isSystemMessage  = msgSys
             )
             docRef.set(chatMsg).await()
         } catch (e: Exception) {
@@ -237,42 +240,28 @@ object JammingService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Strategy 5: Reactions — direct dot-notation field update, no transaction
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Reactions (Firestore transaction — identical to GOATU) ──────────────
 
-    /**
-     * Toggles an emoji reaction for [userName] on a message.
-     * Uses Firestore dot-notation field path update — atomic at field level,
-     * no transaction read needed. Saves 1 READ per reaction.
-     *
-     * Data shape: reactions.{emoji}.{userName} = true (present) or deleted (removed)
-     */
     suspend fun addReaction(roomId: String, messageId: String, emoji: String, userName: String) {
         try {
             val docRef = messagesCol(roomId).document(messageId)
-            // Check current state locally from the message snapshot already in memory.
-            // We use a simple toggle: field present = reacted, delete = un-reacted.
-            // Firestore handles concurrent writes at the field path level atomically.
-            val fieldPath = "reactions.$emoji.$userName"
-            // Peek current value to decide toggle direction
-            val snapshot = docRef.get().await()
-            val currentVal = snapshot.getBoolean("reactions.$emoji.$userName")
-            if (currentVal == true) {
-                // Already reacted — remove
-                docRef.update(fieldPath, com.google.firebase.firestore.FieldValue.delete()).await()
-            } else {
-                // Not reacted — add (1 write, no transaction read)
-                docRef.update(fieldPath, true).await()
-            }
+            db.runTransaction { transaction ->
+                val snapshot  = transaction.get(docRef)
+                val msg       = snapshot.toObject(ChatMessage::class.java) ?: return@runTransaction
+                val newReactions = msg.reactions.toMutableMap()
+                val usersList = newReactions[emoji]?.toMutableList() ?: mutableListOf()
+                if (!usersList.contains(userName)) {
+                    usersList.add(userName)
+                    newReactions[emoji] = usersList
+                    transaction.update(docRef, "reactions", newReactions)
+                }
+            }.await()
         } catch (e: Exception) {
             Log.e(TAG, "addReaction failed", e)
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Typing Status  (RTDB — already free)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Typing Status (RTDB — identical to GOATU) ────────────────────────────
 
     fun setTypingStatus(roomId: String, userName: String, isTyping: Boolean) {
         val typingRef = rtdb.getReference("jamming_rooms/$roomId/typing/$userName")
@@ -301,9 +290,7 @@ object JammingService {
         awaitClose { typingRef.removeEventListener(listener) }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Message Listener  (Firestore — persistent chat history)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── Message Listener (Firestore — identical to GOATU) ───────────────────
 
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
         val listener = messagesCol(roomId)
@@ -312,28 +299,7 @@ object JammingService {
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
                 if (snapshot != null) {
-                    val messages = snapshot.documents.mapNotNull { doc ->
-                        // Map nested reactions map<emoji, map<userId, Boolean>> correctly
-                        val rawReactions = doc.get("reactions") as? Map<*, *>
-                        val reactions = rawReactions?.mapNotNull { (emojiKey, usersVal) ->
-                            val emoji = emojiKey as? String ?: return@mapNotNull null
-                            val usersMap = (usersVal as? Map<*, *>)?.mapNotNull { (uKey, uVal) ->
-                                val uid = uKey as? String ?: return@mapNotNull null
-                                uid to ((uVal as? Boolean) ?: false)
-                            }?.toMap() ?: emptyMap()
-                            emoji to usersMap
-                        }?.toMap() ?: emptyMap()
-
-                        ChatMessage(
-                            id               = doc.id,
-                            senderName       = doc.getString("senderName") ?: "",
-                            message          = doc.getString("message") ?: "",
-                            timestamp        = doc.getLong("timestamp") ?: System.currentTimeMillis(),
-                            replyToMessageId = doc.getString("replyToMessageId"),
-                            reactions        = reactions,
-                            isSystemMessage  = doc.getBoolean("isSystemMessage") ?: false
-                        )
-                    }
+                    val messages = snapshot.documents.mapNotNull { it.toObject(ChatMessage::class.java) }
                     trySend(messages)
                 }
             }

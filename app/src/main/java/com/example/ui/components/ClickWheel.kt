@@ -76,7 +76,7 @@ fun ClickWheel(
             while (isPrevPressed) {
                 view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                 val currentPos = viewModel.currentPositionMs.value
-                viewModel.seekTo(maxOf(0, currentPos - 5000))
+                viewModel.seekTo(maxOf(0, currentPos - 5000), fromUser = true)
                 kotlinx.coroutines.delay(500)
             }
         }
@@ -93,7 +93,7 @@ fun ClickWheel(
             while (isNextPressed) {
                 view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
                 val currentPos = viewModel.currentPositionMs.value
-                viewModel.seekTo(currentPos + 5000)
+                viewModel.seekTo(currentPos + 5000, fromUser = true)
                 kotlinx.coroutines.delay(500)
             }
         }

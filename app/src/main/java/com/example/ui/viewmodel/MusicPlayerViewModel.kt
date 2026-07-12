@@ -205,30 +205,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     
     private val _jammingRoomMessages = MutableStateFlow<List<com.example.data.remote.ChatMessage>>(emptyList())
     val jammingRoomMessages = _jammingRoomMessages.asStateFlow()
-
-    // Strategy 3: last system event (song changed / play / pause) surfaced from RTDB state
-    private val _lastJamSystemEvent = MutableStateFlow("")
-    val lastJamSystemEvent = _lastJamSystemEvent.asStateFlow()
     
     fun setJammingRoomId(roomId: String) {
         _jammingRoomId.value = roomId
     }
 
     private var lastLocalActionTime = 0L
+    private var lastPeriodicPushTime = 0L
 
     /**
-     * Pushes playback state to RTDB (fire-and-forget, no coroutine needed).
-     * [systemEvent] is embedded in RTDB state (Strategy 3) so no separate
-     * Firestore message document is created.
+     * Pushes playback state to RTDB (fire-and-forget — no coroutine needed since
+     * updateRoomState is no longer suspend).
      */
-    fun pushJammingState(systemEvent: String = "") {
+    fun pushJammingState() {
         val roomId = _jammingRoomId.value
         val track  = _currentTrack.value
         if (roomId.isNotBlank() && track != null) {
             lastLocalActionTime = System.currentTimeMillis()
-            // updateRoomState is now fire-and-forget (RTDB), no coroutine needed
             com.example.data.remote.JammingService.updateRoomState(
-                roomId, track, _isPlaying.value, _currentPositionMs.value, systemEvent
+                roomId, track, _isPlaying.value, _currentPositionMs.value
             )
         }
     }
@@ -611,21 +606,19 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             _jammingRoomId.collectLatest { roomId ->
                 if (roomId.isNotBlank()) {
-                    launch {
-                        com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
-                            _jammingRoomState.value = room
-                            if (room != null) {
-                                syncFromRemote(room)
-                                // Strategy 3: update system event banner from RTDB state
-                                if (room.lastSystemEvent.isNotBlank()) {
-                                    _lastJamSystemEvent.value = room.lastSystemEvent
+                    kotlinx.coroutines.coroutineScope {
+                        launch {
+                            com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
+                                _jammingRoomState.value = room
+                                if (room != null) {
+                                    syncFromRemote(room)
                                 }
                             }
                         }
-                    }
-                    launch {
-                        com.example.data.remote.JammingService.listenToMessages(roomId).collect { msgs ->
-                            _jammingRoomMessages.value = msgs
+                        launch {
+                            com.example.data.remote.JammingService.listenToMessages(roomId).collect { msgs ->
+                                _jammingRoomMessages.value = msgs
+                            }
                         }
                     }
                 } else {
@@ -798,12 +791,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             lastTrackChangeTime = System.currentTimeMillis()
             _playTrigger.value += 1
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
-            pushJammingState(
-                systemEvent = if (_jammingRoomId.value.isNotBlank()) {
-                    val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
-                    "$userName changed the song to ${resolved.title}"
-                } else ""
-            )
+            pushJammingState()
+            
+            val roomId = _jammingRoomId.value
+            if (roomId.isNotBlank()) {
+                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+                viewModelScope.launch {
+                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName changed the song to ${resolved.title}")
+                }
+            }
 
             // Prefetch lyrics in the background so they are instantly available when the user clicks the Lyrics button
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -970,10 +966,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
         _isPlaying.value = playing
         if (fromUser) {
-            val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
-            val action = if (playing) "resumed" else "paused"
-            val event = if (_jammingRoomId.value.isNotBlank()) "$userName $action the playback" else ""
-            pushJammingState(systemEvent = event)
+            pushJammingState()
+            val roomId = _jammingRoomId.value
+            if (roomId.isNotBlank()) {
+                val action = if (playing) "resumed" else "paused"
+                val userName = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Someone"
+                viewModelScope.launch {
+                    com.example.data.remote.JammingService.sendMessage(roomId, "System", "$userName $action the playback")
+                }
+            }
         }
     }
 
@@ -994,6 +995,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     lastSeekTime = 0L
                     _isLoading.value = false
                     _currentPositionMs.value = positionMs
+                    checkAndPushPeriodicProgress()
                 }
                 elapsed >= 3000L -> {
                     // Timeout — give up waiting, accept whatever position comes in
@@ -1001,12 +1003,24 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     lastSeekTime = 0L
                     _isLoading.value = false
                     _currentPositionMs.value = positionMs
+                    checkAndPushPeriodicProgress()
                 }
                 // else: still within 3s window and not near target — skip this update
             }
             return
         }
         _currentPositionMs.value = positionMs
+        checkAndPushPeriodicProgress()
+    }
+
+    private fun checkAndPushPeriodicProgress() {
+        val now = System.currentTimeMillis()
+        val roomId = _jammingRoomId.value
+        val isHost = _jammingRoomState.value?.hostId == currentUserId
+        if (roomId.isNotBlank() && isHost && _isPlaying.value && (now - lastPeriodicPushTime >= 6000L)) {
+            lastPeriodicPushTime = now
+            pushJammingState()
+        }
     }
 
 
@@ -1089,6 +1103,45 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 playResolvedTrack(q[prevIdx])
             }
         }
+    }
+
+    // Confirmation Dialog States for Unliking & Removing Songs
+    private val _trackToUnlike = MutableStateFlow<Track?>(null)
+    val trackToUnlike = _trackToUnlike.asStateFlow()
+
+    private val _trackToRemoveFromPlaylist = MutableStateFlow<Pair<Track, Long>?>(null)
+    val trackToRemoveFromPlaylist = _trackToRemoveFromPlaylist.asStateFlow()
+
+    fun requestUnlike(track: Track) {
+        _trackToUnlike.value = track
+    }
+
+    fun confirmUnlike() {
+        val track = _trackToUnlike.value
+        if (track != null) {
+            toggleLikeTrack(track)
+            _trackToUnlike.value = null
+        }
+    }
+
+    fun cancelUnlike() {
+        _trackToUnlike.value = null
+    }
+
+    fun requestRemoveFromPlaylist(track: Track, playlistId: Long) {
+        _trackToRemoveFromPlaylist.value = Pair(track, playlistId)
+    }
+
+    fun confirmRemoveFromPlaylist() {
+        val pair = _trackToRemoveFromPlaylist.value
+        if (pair != null) {
+            removeTrackFromPlaylist(pair.first, pair.second)
+            _trackToRemoveFromPlaylist.value = null
+        }
+    }
+
+    fun cancelRemoveFromPlaylist() {
+        _trackToRemoveFromPlaylist.value = null
     }
 
     // Liked Songs Management

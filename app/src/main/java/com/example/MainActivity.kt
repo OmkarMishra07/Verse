@@ -746,6 +746,52 @@ fun iPodDeviceFrame(
                     .padding(bottom = 12.dp, start = 24.dp, end = 24.dp)
             )
         }
+
+        // Render Unlike / Remove Song confirmation dialogs at the top-level Box so they show in both Classic and Modern modes
+        val trackToUnlike by viewModel.trackToUnlike.collectAsState()
+        val trackToRemoveFromPlaylist by viewModel.trackToRemoveFromPlaylist.collectAsState()
+
+        if (trackToUnlike != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelUnlike() },
+                title = { Text("Unlike Song", color = Color.White) },
+                text = { Text("Are you sure you want to unlike '${trackToUnlike?.title}'?", color = Color.White.copy(alpha = 0.8f)) },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmUnlike() }) {
+                        Text("Unlike", color = Color.Red)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.cancelUnlike() }) {
+                        Text("Cancel", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFF1E1E1E),
+                titleContentColor = Color.White,
+                textContentColor = Color.White
+            )
+        }
+
+        if (trackToRemoveFromPlaylist != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelRemoveFromPlaylist() },
+                title = { Text("Remove from Playlist", color = Color.White) },
+                text = { Text("Are you sure you want to remove '${trackToRemoveFromPlaylist?.first?.title}' from this playlist?", color = Color.White.copy(alpha = 0.8f)) },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmRemoveFromPlaylist() }) {
+                        Text("Remove", color = Color.Red)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.cancelRemoveFromPlaylist() }) {
+                        Text("Cancel", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFF1E1E1E),
+                titleContentColor = Color.White,
+                textContentColor = Color.White
+            )
+        }
     }
 }
 
@@ -1910,7 +1956,13 @@ fun NowPlayingScreen(
                     }
 
                     IconButton(
-                        onClick = { viewModel.toggleLikeTrack(currentTrack!!) },
+                        onClick = { 
+                            if (isLiked) {
+                                viewModel.requestUnlike(currentTrack!!)
+                            } else {
+                                viewModel.toggleLikeTrack(currentTrack!!)
+                            }
+                        },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
@@ -2206,11 +2258,12 @@ fun JammingScreen(
                 val code = inputRoomCode.trim()
                 if (code.isNotEmpty()) {
                     coroutineScope.launch {
-                        val success = com.example.data.remote.JammingService.joinRoom(code, myName)
-                        if (success) {
-                            viewModel.setJammingRoomId(code)
-                        } else {
-                            android.widget.Toast.makeText(context, "Failed to join room. Check code.", android.widget.Toast.LENGTH_SHORT).show()
+                        val result = com.example.data.remote.JammingService.joinRoom(code, myName)
+                        when (result) {
+                            "SUCCESS" -> viewModel.setJammingRoomId(code)
+                            "FULL" -> android.widget.Toast.makeText(context, "Room is full (limit is 10 occupants).", android.widget.Toast.LENGTH_SHORT).show()
+                            "NOT_FOUND" -> android.widget.Toast.makeText(context, "Room code not found.", android.widget.Toast.LENGTH_SHORT).show()
+                            else -> android.widget.Toast.makeText(context, "Failed to join room. Try again.", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -2287,7 +2340,7 @@ fun JammingScreen(
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                                 Icon(Icons.Default.People, contentDescription = "Participants", tint = Color.Gray, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("$participantsCount", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("$participantsCount/10", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -3042,7 +3095,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         }
 
                         IconButton(
-                            onClick = { viewModel.toggleLikeTrack(track) },
+                            onClick = { viewModel.requestUnlike(track) },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
@@ -3525,7 +3578,7 @@ fun PlaylistDetailScreen(viewModel: MusicPlayerViewModel) {
                         }
 
                         IconButton(
-                            onClick = { playlist?.let { viewModel.removeTrackFromPlaylist(track, it.id) } },
+                            onClick = { playlist?.let { viewModel.requestRemoveFromPlaylist(track, it.id) } },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(

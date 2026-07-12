@@ -450,7 +450,7 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
             Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM  -> MusicPlayerViewModel.instance?.playNext()
             Player.COMMAND_SEEK_TO_PREVIOUS,
             Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> MusicPlayerViewModel.instance?.playPrevious()
-            else -> MusicPlayerViewModel.instance?.seekTo(positionMs)
+            else -> MusicPlayerViewModel.instance?.seekTo(positionMs, fromUser = true)
         }
         return Futures.immediateVoidFuture()
     }
