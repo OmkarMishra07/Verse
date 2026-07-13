@@ -122,15 +122,52 @@ object JammingService {
     }
 
     suspend fun leaveRoom(roomId: String, participantName: String): Boolean {
+        val roomRef = roomsCol().document(roomId)
         return try {
-            roomsCol().document(roomId).update(
-                "participants", com.google.firebase.firestore.FieldValue.arrayRemove(participantName),
-                "lastActivityTimestamp", com.google.firebase.Timestamp.now()
-            ).await()
-            sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
-            // Clean up RTDB
-            rtdbStateRef(roomId).child("participants/$participantName").removeValue()
-            rtdb.getReference("jamming_rooms/$roomId/typing/$participantName").removeValue()
+            val result = db.runTransaction { transaction ->
+                val snapshot = transaction.get(roomRef)
+                if (!snapshot.exists()) return@runTransaction "NOT_FOUND"
+                val room = snapshot.toObject(JammingRoom::class.java) ?: return@runTransaction "NOT_FOUND"
+                
+                val updatedParticipants = room.participants.filter { it != participantName }
+                if (updatedParticipants.isEmpty()) {
+                    transaction.delete(roomRef)
+                    return@runTransaction "DESTROYED"
+                } else {
+                    if (room.hostName == participantName) {
+                        val newHost = updatedParticipants.first()
+                        transaction.update(
+                            roomRef,
+                            "participants", updatedParticipants,
+                            "hostName", newHost,
+                            "lastActivityTimestamp", com.google.firebase.Timestamp.now()
+                        )
+                        return@runTransaction "MIGRATED_$newHost"
+                    } else {
+                        transaction.update(
+                            roomRef,
+                            "participants", updatedParticipants,
+                            "lastActivityTimestamp", com.google.firebase.Timestamp.now()
+                        )
+                        return@runTransaction "LEFT"
+                    }
+                }
+            }.await()
+
+            if (result == "DESTROYED") {
+                // Wipe the entire room from RTDB
+                rtdb.getReference("jamming_rooms/$roomId").removeValue()
+            } else {
+                sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
+                rtdbStateRef(roomId).child("participants/$participantName").removeValue()
+                rtdb.getReference("jamming_rooms/$roomId/typing/$participantName").removeValue()
+                
+                if (result.startsWith("MIGRATED_")) {
+                    val newHost = result.removePrefix("MIGRATED_")
+                    rtdbStateRef(roomId).child("hostName").setValue(newHost)
+                    sendMessage(roomId, "System", "👑 $newHost is now the Host!", isSystemMessage = true)
+                }
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "leaveRoom failed", e)

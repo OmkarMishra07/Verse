@@ -1016,7 +1016,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private fun checkAndPushPeriodicProgress() {
         val now = System.currentTimeMillis()
         val roomId = _jammingRoomId.value
-        val isHost = _jammingRoomState.value?.hostId == currentUserId
+        val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
+        val isHost = _jammingRoomState.value?.hostName == me
         if (roomId.isNotBlank() && isHost && _isPlaying.value && (now - lastPeriodicPushTime >= 6000L)) {
             lastPeriodicPushTime = now
             pushJammingState()
@@ -1032,6 +1033,17 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun playNext(isAutoPlay: Boolean = false) {
         val q = _queue.value
         if (q.isEmpty()) return
+        
+        // If in Jam Session and NOT the host, IGNORE AutoPlay (song ending).
+        // Let the host pick the next song and push it over RTDB.
+        val roomId = _jammingRoomId.value
+        val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
+        val isHost = _jammingRoomState.value?.hostName == me
+        if (roomId.isNotBlank() && !isHost && isAutoPlay) {
+            android.util.Log.d("MusicPlayerViewModel", "Guest ignored auto-play playNext. Waiting for host.")
+            return
+        }
+
         FirebaseCrashlytics.getInstance().log("playNext: isAutoPlay=$isAutoPlay repeatMode=${_repeatMode.value} queueSize=${q.size} idx=${_currentQueueIndex.value}")
 
         if (isAutoPlay && _repeatMode.value == RepeatMode.ONE) {
