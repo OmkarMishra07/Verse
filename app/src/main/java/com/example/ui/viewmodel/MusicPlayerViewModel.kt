@@ -256,8 +256,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         val elapsed = System.currentTimeMillis() - state.updatedAt
         val expectedMs = if (state.playing) state.positionMs + elapsed else state.positionMs
-        // Reduced threshold: 500ms instead of 3000ms for tighter sync on seeks
-        if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 500) {
+        // Threshold set to 3000ms to prevent annoying micro-stutters every 6 seconds
+        if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 3000) {
             android.util.Log.d("JamSync", "Seeking to ${expectedMs}ms (elapsed=${elapsed}ms, diff=${Math.abs(_currentPositionMs.value - expectedMs)}ms)")
             _currentPositionMs.value = expectedMs
             _seekRequestMs.value = expectedMs
