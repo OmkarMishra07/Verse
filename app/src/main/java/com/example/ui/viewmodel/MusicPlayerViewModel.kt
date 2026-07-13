@@ -1094,7 +1094,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         // If current song is > 3 seconds, restart it. Otherwise previous song.
         if (_currentPositionMs.value > 3000L) {
             _currentPositionMs.value = 0L
-            seekTo(0L)
+            seekTo(0L, fromUser = true)
         } else {
             val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
             _currentQueueIndex.value = prevIdx

@@ -225,16 +225,17 @@ object JammingService {
         isSystemMessage: Boolean = false
     ) {
         try {
-            val docRef  = messagesCol(roomId).document()
+            val chatRef = rtdb.getReference("jamming_rooms/$roomId/chats").push()
             val msgSys  = isSystemMessage || senderName == "System"
             val chatMsg = ChatMessage(
-                id               = docRef.id,
+                id               = chatRef.key ?: "",
                 senderName       = senderName,
                 message          = message,
+                timestamp        = System.currentTimeMillis(),
                 replyToMessageId = replyToMessageId,
                 isSystemMessage  = msgSys
             )
-            docRef.set(chatMsg).await()
+            chatRef.setValue(chatMsg).await()
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage failed", e)
         }
@@ -244,18 +245,15 @@ object JammingService {
 
     suspend fun addReaction(roomId: String, messageId: String, emoji: String, userName: String) {
         try {
-            val docRef = messagesCol(roomId).document(messageId)
-            db.runTransaction { transaction ->
-                val snapshot  = transaction.get(docRef)
-                val msg       = snapshot.toObject(ChatMessage::class.java) ?: return@runTransaction
-                val newReactions = msg.reactions.toMutableMap()
-                val usersList = newReactions[emoji]?.toMutableList() ?: mutableListOf()
-                if (!usersList.contains(userName)) {
-                    usersList.add(userName)
-                    newReactions[emoji] = usersList
-                    transaction.update(docRef, "reactions", newReactions)
-                }
-            }.await()
+            val reactRef = rtdb.getReference("jamming_rooms/$roomId/chats/$messageId/reactions/$emoji")
+            val snapshot = reactRef.get().await()
+            val typeIndicator = object : com.google.firebase.database.GenericTypeIndicator<List<String>>() {}
+            val usersList = snapshot.getValue(typeIndicator)?.toMutableList() ?: mutableListOf()
+            
+            if (!usersList.contains(userName)) {
+                usersList.add(userName)
+                reactRef.setValue(usersList).await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "addReaction failed", e)
         }
@@ -293,16 +291,21 @@ object JammingService {
     // ─── Message Listener (Firestore — identical to GOATU) ───────────────────
 
     fun listenToMessages(roomId: String): Flow<List<ChatMessage>> = callbackFlow {
-        val listener = messagesCol(roomId)
-            .orderBy("timestamp")
-            .limitToLast(20)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) { close(error); return@addSnapshotListener }
-                if (snapshot != null) {
-                    val messages = snapshot.documents.mapNotNull { it.toObject(ChatMessage::class.java) }
-                    trySend(messages)
+        val chatRef = rtdb.getReference("jamming_rooms/$roomId/chats").orderByChild("timestamp").limitToLast(50)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val messages = mutableListOf<ChatMessage>()
+                for (child in snapshot.children) {
+                    val msg = child.getValue(ChatMessage::class.java)
+                    if (msg != null) messages.add(msg)
                 }
+                trySend(messages)
             }
-        awaitClose { listener.remove() }
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+        chatRef.addValueEventListener(listener)
+        awaitClose { chatRef.removeEventListener(listener) }
     }
 }
