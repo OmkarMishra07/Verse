@@ -322,6 +322,8 @@ class VerseMusicService : MediaSessionService() {
 
     // ── Locks ────────────────────────────────────────────────────────────────
 
+    private val silentAudioPlayer = com.example.utils.SilentAudioPlayer()
+
     private fun acquireLocks() {
         if (locksAcquired) return
         locksAcquired = true
@@ -335,11 +337,15 @@ class VerseMusicService : MediaSessionService() {
                 .createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Verse:WifiLock")
                 .apply { acquire() }
         } catch (e: Exception) { Log.e("VerseMusicService", "WifiLock error: ${e.message}") }
+        
+        // Start the silent audio hack to protect the WebView from CPU throttling
+        silentAudioPlayer.start()
     }
 
     private fun releaseLocks() {
         if (!locksAcquired) return
         locksAcquired = false
+        silentAudioPlayer.stop()
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
         wakeLock = null

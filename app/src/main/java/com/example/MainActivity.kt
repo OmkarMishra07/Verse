@@ -137,16 +137,19 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize(), containerColor = Color(0xFF0F0F0F)) { innerPadding ->
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
+                            .fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         val authViewModel: AuthViewModel = viewModel()
                         val currentUser by authViewModel.currentUser.collectAsState()
                         val musicViewModel: com.example.ui.viewmodel.MusicPlayerViewModel = viewModel()
 
+                        val context = LocalContext.current
                         LaunchedEffect(currentUser) {
                             val user = currentUser
+                            // Trim cache in background on startup
+                            com.example.utils.CacheManager.trimCacheIfNeeded(context)
+                            
                             if (user != null) {
                                 com.example.data.remote.FirestoreService.initUserProfile(user)
                                 musicViewModel.onUserLoggedIn(user.uid)
@@ -1199,7 +1202,6 @@ fun iPodStatusBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

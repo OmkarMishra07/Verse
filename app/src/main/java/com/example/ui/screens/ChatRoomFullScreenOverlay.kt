@@ -456,8 +456,7 @@ fun ChatRoomFullScreenOverlay(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF161616).copy(alpha = 0.5f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .windowInsetsPadding(WindowInsets.navigationBars),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(

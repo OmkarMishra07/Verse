@@ -170,12 +170,13 @@ object WebViewHolder {
     }
 
     fun destroy() {
+        webView?.clearCache(true)
         webView?.destroy()
         webView = null
         isInitialized = false
         isPlayerReady = false
         hasLoadedFirstVideo = false
-        Log.d("WebViewHolder", "WebView destroyed")
+        Log.d("WebViewHolder", "WebView destroyed and cache cleared")
     }
 
     private fun buildIframeHtml(videoId: String, startSeconds: Int, autoplay: Int): String = """
