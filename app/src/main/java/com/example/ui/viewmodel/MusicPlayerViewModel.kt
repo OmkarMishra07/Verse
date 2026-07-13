@@ -1301,8 +1301,13 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun onUserLoggedOut() {
+        val uid = currentUserId
         currentUserId = null
         viewModelScope.launch {
+            if (uid != null) {
+                val prefs = getApplication<android.app.Application>().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.edit().remove("last_firestore_sync_$uid").apply()
+            }
             songDao.clearAllData()
             _queue.value = CuratedTracks.allCurated
             _currentQueueIndex.value = 0
