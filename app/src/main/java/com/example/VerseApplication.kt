@@ -8,6 +8,16 @@ import coil.memory.MemoryCache
 import coil.request.CachePolicy
 
 class VerseApplication : Application(), ImageLoaderFactory {
+    companion object {
+        lateinit var instance: VerseApplication
+            private set
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
+
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .crossfade(true)

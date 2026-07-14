@@ -55,13 +55,33 @@ fun ChatRoomFullScreenOverlay(
     var showChatSearch by remember { mutableStateOf(false) }
     var showParticipantsOverlay by remember { mutableStateOf(false) }
     
+    val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    val typingUsers by viewModel.typingUsers.collectAsState()
 
     // Keep typing status updated
     LaunchedEffect(chatMsg) {
         if (jammingRoomId.isNotBlank()) {
             com.example.data.remote.JammingService.setTypingStatus(jammingRoomId, myName, chatMsg.isNotBlank())
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (jammingRoomId.isNotBlank()) {
+                com.example.data.remote.JammingService.setTypingStatus(jammingRoomId, myName, false)
+            }
+        }
+    }
+
+    LaunchedEffect(chatMessages) {
+        if (jammingRoomId.isNotBlank() && chatMessages.isNotEmpty()) {
+            val lastMsgTimestamp = chatMessages.maxOfOrNull { it.timestamp } ?: 0L
+            if (lastMsgTimestamp > 0) {
+                com.example.data.remote.JammingService.updateLastReadMessage(jammingRoomId, myName, lastMsgTimestamp)
+            }
         }
     }
     
@@ -147,11 +167,19 @@ fun ChatRoomFullScreenOverlay(
                         fontSize = 18.sp, 
                         fontWeight = FontWeight.Bold
                     )
+                    val subtitleText = when {
+                        typingUsers.isEmpty() -> "Code: $jammingRoomId"
+                        typingUsers.size == 1 -> "${typingUsers.first()} is typing..."
+                        typingUsers.size == 2 -> "${typingUsers[0]} and ${typingUsers[1]} are typing..."
+                        else -> "Multiple people are typing..."
+                    }
+                    val subtitleColor = if (typingUsers.isNotEmpty()) Color(0xFF00C853) else Color.Gray
+                    
                     Text(
-                        "Code: $jammingRoomId", 
-                        color = Color(0xFF00C853), // Modern green accent
+                        text = subtitleText, 
+                        color = subtitleColor, 
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = if (typingUsers.isNotEmpty()) FontWeight.Bold else FontWeight.Medium
                     )
                 }
                 
@@ -360,12 +388,55 @@ fun ChatRoomFullScreenOverlay(
                                     Row(verticalAlignment = Alignment.Bottom) {
                                         Text(msg.message, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f, fill = false))
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            timeFormat.format(Date(msg.timestamp)),
-                                            color = Color.White.copy(alpha = 0.5f),
-                                            fontSize = 10.sp,
-                                            modifier = Modifier.padding(bottom = 1.dp)
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                timeFormat.format(Date(msg.timestamp)),
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(bottom = 1.dp)
+                                            )
+                                            if (isMe) {
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                val otherParticipants = roomState?.participants?.filter { it != myName } ?: emptyList()
+                                                if (otherParticipants.isEmpty()) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Done,
+                                                        contentDescription = "Sent",
+                                                        tint = Color.LightGray.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                } else {
+                                                    val readMap = roomState?.lastReadMessage ?: emptyMap()
+                                                    val readCount = otherParticipants.count { (readMap[it] ?: 0L) >= msg.timestamp }
+                                                    when {
+                                                        readCount == 0 -> {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Done,
+                                                                contentDescription = "Sent",
+                                                                tint = Color.LightGray.copy(alpha = 0.6f),
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                        readCount < otherParticipants.size -> {
+                                                            Icon(
+                                                                imageVector = Icons.Default.DoneAll,
+                                                                contentDescription = "Delivered",
+                                                                tint = Color.LightGray.copy(alpha = 0.6f),
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                        else -> {
+                                                            Icon(
+                                                                imageVector = Icons.Default.DoneAll,
+                                                                contentDescription = "Read",
+                                                                tint = Color(0xFF53BDEB), // WhatsApp blue tick color
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
@@ -509,7 +580,46 @@ fun ChatRoomFullScreenOverlay(
                     onClose = { showParticipantsOverlay = false },
                     onKick = { participantToKick ->
                         coroutineScope.launch {
-                            com.example.data.remote.JammingService.leaveRoom(jammingRoomId, participantToKick)
+                            try {
+                                com.example.data.remote.JammingService.kickUser(jammingRoomId, myName, participantToKick)
+                                android.widget.Toast.makeText(context, "Kicked $participantToKick", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to kick: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onBlock = { participantToBlock ->
+                        coroutineScope.launch {
+                            try {
+                                com.example.data.remote.JammingService.blockUser(jammingRoomId, myName, participantToBlock)
+                                android.widget.Toast.makeText(context, "Blocked $participantToBlock", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to block: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onUnban = { participantToUnban ->
+                        coroutineScope.launch {
+                            try {
+                                com.example.data.remote.JammingService.unbanUser(jammingRoomId, myName, participantToUnban)
+                                android.widget.Toast.makeText(context, "Unbanned $participantToUnban", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to unban: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onTransfer = { newHost ->
+                        coroutineScope.launch {
+                            try {
+                                val success = com.example.data.remote.JammingService.transferHost(jammingRoomId, myName, newHost)
+                                if (success) {
+                                    android.widget.Toast.makeText(context, "Transferred host to $newHost", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    android.widget.Toast.makeText(context, "Failed to transfer host.", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Error transferring host: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 )

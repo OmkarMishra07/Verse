@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,16 +36,24 @@ fun JammingParticipantsOverlay(
     myName: String,
     currentTrackThumbnail: String?,
     onClose: () -> Unit,
-    onKick: (String) -> Unit
+    onKick: (String) -> Unit,
+    onBlock: (String) -> Unit,
+    onUnban: (String) -> Unit,
+    onTransfer: (String) -> Unit
 ) {
     BackHandler { onClose() }
     
     var searchQuery by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableStateOf(0) } // 0 = Active, 1 = Banned
     
     val participants = roomState.participants.filter {
         it.contains(searchQuery, ignoreCase = true)
     }
+    val blocked = roomState.blocked.filter {
+        it.contains(searchQuery, ignoreCase = true)
+    }
     val isHost = roomState.hostName == myName
+    val displayList = if (isHost && selectedTab == 1) blocked else participants
 
     Box(
         modifier = Modifier
@@ -122,17 +131,44 @@ fun JammingParticipantsOverlay(
                 )
             )
             
-            HorizontalDivider(color = Color.DarkGray.copy(alpha=0.5f), thickness = 1.dp, modifier = Modifier.padding(vertical = 8.dp))
+            if (isHost) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { selectedTab = 0 },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (selectedTab == 0) Color(0xFF00C853) else Color.DarkGray),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Active (${roomState.participants.size})")
+                    }
+                    Button(
+                        onClick = { selectedTab = 1 },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (selectedTab == 1) Color(0xFF00C853) else Color.DarkGray),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Banned (${roomState.blocked.size})")
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             
             // List
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 100.dp)
             ) {
-                items(participants) { participant ->
+                items(displayList) { participant ->
                     var showOptions by remember { mutableStateOf(false) }
+                    var showKickConfirm by remember { mutableStateOf(false) }
+                    var showBanConfirm by remember { mutableStateOf(false) }
+                    var showTransferConfirm by remember { mutableStateOf(false) }
                     
                     val isParticipantHost = participant == roomState.hostName
+                    val isBannedTab = isHost && selectedTab == 1
                     
                     Row(
                         modifier = Modifier
@@ -140,7 +176,7 @@ fun JammingParticipantsOverlay(
                             .combinedClickable(
                                 onClick = {},
                                 onLongClick = {
-                                    if (isHost && !isParticipantHost) {
+                                    if (isHost && !isParticipantHost && !isBannedTab) {
                                         showOptions = true
                                     }
                                 }
@@ -178,9 +214,31 @@ fun JammingParticipantsOverlay(
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF00C853)))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Listening", color = Color.Gray, fontSize = 12.sp)
+                                if (isBannedTab) {
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.Red))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Banned", color = Color.Red, fontSize = 12.sp)
+                                } else {
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF00C853)))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Listening", color = Color.Gray, fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        if (isBannedTab) {
+                            Button(
+                                onClick = { onUnban(participant) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Unban", color = Color(0xFF00C853), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (isHost && !isParticipantHost) {
+                            IconButton(onClick = { showOptions = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = Color.Gray)
                             }
                         }
                     }
@@ -188,18 +246,110 @@ fun JammingParticipantsOverlay(
                     if (showOptions) {
                         AlertDialog(
                             onDismissRequest = { showOptions = false },
-                            title = { Text("Manage User", color = Color.White) },
-                            text = { Text("Are you sure you want to kick $participant from the room?", color = Color.LightGray) },
+                            title = { Text(participant, color = Color.White, fontWeight = FontWeight.Bold) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            showOptions = false
+                                            showTransferConfirm = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Transfer Host", color = Color(0xFF00C853), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    HorizontalDivider(color = Color.DarkGray.copy(alpha=0.3f))
+                                    TextButton(
+                                        onClick = {
+                                            showOptions = false
+                                            showKickConfirm = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Kick from Jam", color = Color.Red, fontSize = 16.sp)
+                                    }
+                                    HorizontalDivider(color = Color.DarkGray.copy(alpha=0.3f))
+                                    TextButton(
+                                        onClick = {
+                                            showOptions = false
+                                            showBanConfirm = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Ban from Jam", color = Color.Red, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            },
+                            confirmButton = {},
+                            dismissButton = {
+                                TextButton(onClick = { showOptions = false }) {
+                                    Text("Cancel", color = Color.White)
+                                }
+                            },
+                            containerColor = Color(0xFF1E1E1E)
+                        )
+                    }
+
+                    if (showTransferConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showTransferConfirm = false },
+                            title = { Text("Transfer Host", color = Color.White) },
+                            text = { Text("Transfer host to $participant?\n\n$participant will receive all host permissions.\n\nYou will become a normal participant.", color = Color.LightGray) },
                             confirmButton = {
-                                TextButton(onClick = { 
-                                    onKick(participant)
-                                    showOptions = false
+                                TextButton(onClick = {
+                                    showTransferConfirm = false
+                                    onTransfer(participant)
+                                    onClose()
                                 }) {
-                                    Text("Kick", color = Color.Red)
+                                    Text("Transfer", color = Color(0xFF00C853), fontWeight = FontWeight.Bold)
                                 }
                             },
                             dismissButton = {
-                                TextButton(onClick = { showOptions = false }) {
+                                TextButton(onClick = { showTransferConfirm = false }) {
+                                    Text("Cancel", color = Color.White)
+                                }
+                            },
+                            containerColor = Color(0xFF1E1E1E)
+                        )
+                    }
+
+                    if (showKickConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showKickConfirm = false },
+                            title = { Text("Kick User", color = Color.White) },
+                            text = { Text("Remove $participant from this Jam?\n\n$participant can join again using the invitation.", color = Color.LightGray) },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showKickConfirm = false
+                                    onKick(participant)
+                                }) {
+                                    Text("Kick", color = Color.Red, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showKickConfirm = false }) {
+                                    Text("Cancel", color = Color.White)
+                                }
+                            },
+                            containerColor = Color(0xFF1E1E1E)
+                        )
+                    }
+
+                    if (showBanConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showBanConfirm = false },
+                            title = { Text("Ban User", color = Color.White) },
+                            text = { Text("Ban $participant?\n\n$participant won't be able to join this Jam again unless you remove the ban.", color = Color.LightGray) },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showBanConfirm = false
+                                    onBlock(participant)
+                                }) {
+                                    Text("Ban", color = Color.Red, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showBanConfirm = false }) {
                                     Text("Cancel", color = Color.White)
                                 }
                             },

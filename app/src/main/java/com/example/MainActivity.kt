@@ -2236,6 +2236,18 @@ fun JammingScreen(
     var showJamSearch by remember { mutableStateOf(false) }
     var showShareDialog by remember { mutableStateOf(false) }
     var showParticipantsOverlay by remember { mutableStateOf(false) }
+    var showLeaveRoomDialog by remember { mutableStateOf(false) }
+
+    var lastHost by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(roomState) {
+        val newHost = roomState?.hostName
+        if (newHost != null && lastHost != null && newHost != lastHost) {
+            android.widget.Toast.makeText(context, "👑 $newHost is now the host.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        if (newHost != null) {
+            lastHost = newHost
+        }
+    }
 
     val isConnected by viewModel.isRtdbConnected.collectAsState()
 
@@ -2246,8 +2258,12 @@ fun JammingScreen(
             // 1. Check if officially kicked by host
             if (roomState!!.kicked.contains(myName)) {
                 android.widget.Toast.makeText(context, "You were kicked by the host.", android.widget.Toast.LENGTH_LONG).show()
+                val roomToLeave = jammingRoomId
                 viewModel.setJammingRoomId("")
                 showParticipantsOverlay = false
+                coroutineScope.launch {
+                    com.example.data.remote.JammingService.leaveRoom(roomToLeave, myName)
+                }
                 return@LaunchedEffect
             }
 
@@ -2328,6 +2344,9 @@ fun JammingScreen(
                             "SUCCESS" -> viewModel.setJammingRoomId(code)
                             "FULL" -> android.widget.Toast.makeText(context, "Room is full (limit is 10 occupants).", android.widget.Toast.LENGTH_SHORT).show()
                             "NOT_FOUND" -> android.widget.Toast.makeText(context, "Room code not found.", android.widget.Toast.LENGTH_SHORT).show()
+                            "VERSION_MISMATCH" -> android.widget.Toast.makeText(context, "App version mismatch. Please update the app.", android.widget.Toast.LENGTH_SHORT).show()
+                            "OFFLINE" -> android.widget.Toast.makeText(context, "You are offline. Please check your internet connection.", android.widget.Toast.LENGTH_SHORT).show()
+                            "BLOCKED", "KICKED" -> android.widget.Toast.makeText(context, "You are banned from this room.", android.widget.Toast.LENGTH_SHORT).show()
                             else -> android.widget.Toast.makeText(context, "Failed to join room. Try again.", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -2433,8 +2452,12 @@ fun JammingScreen(
                         }
                     }
                     IconButton(onClick = { 
-                        coroutineScope.launch { com.example.data.remote.JammingService.leaveRoom(jammingRoomId, myName) }
-                        viewModel.setJammingRoomId("")
+                        val isRoomHost = roomState?.hostName == myName
+                        if (isRoomHost && (roomState?.participants?.size ?: 0) > 1) {
+                            showLeaveRoomDialog = true
+                        } else {
+                            viewModel.leaveJamSession()
+                        }
                     }) {
                         Icon(Icons.Default.ExitToApp, contentDescription = "Leave", tint = Color.Red, modifier = Modifier.size(32.dp))
                     }
@@ -2603,11 +2626,81 @@ fun JammingScreen(
                     onClose = { showParticipantsOverlay = false },
                     onKick = { participantToKick ->
                         coroutineScope.launch {
-                            com.example.data.remote.JammingService.leaveRoom(jammingRoomId, participantToKick)
+                            try {
+                                com.example.data.remote.JammingService.kickUser(jammingRoomId, myName, participantToKick)
+                                android.widget.Toast.makeText(context, "Kicked $participantToKick", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to kick: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onBlock = { participantToBlock ->
+                        coroutineScope.launch {
+                            try {
+                                com.example.data.remote.JammingService.blockUser(jammingRoomId, myName, participantToBlock)
+                                android.widget.Toast.makeText(context, "Blocked $participantToBlock", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to block: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onUnban = { participantToUnban ->
+                        coroutineScope.launch {
+                            try {
+                                com.example.data.remote.JammingService.unbanUser(jammingRoomId, myName, participantToUnban)
+                                android.widget.Toast.makeText(context, "Unbanned $participantToUnban", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Failed to unban: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onTransfer = { newHost ->
+                        coroutineScope.launch {
+                            try {
+                                val success = com.example.data.remote.JammingService.transferHost(jammingRoomId, myName, newHost)
+                                if (success) {
+                                    android.widget.Toast.makeText(context, "Transferred host to $newHost", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    android.widget.Toast.makeText(context, "Failed to transfer host.", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Error transferring host: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 )
             }
+        }
+
+        if (showLeaveRoomDialog) {
+            AlertDialog(
+                onDismissRequest = { showLeaveRoomDialog = false },
+                title = { Text("Leave Jam?", color = Color.White) },
+                text = { Text("Transfer host before leaving?", color = Color.LightGray) },
+                confirmButton = {
+                    Row {
+                        TextButton(onClick = { 
+                            showLeaveRoomDialog = false
+                            showParticipantsOverlay = true
+                        }) {
+                            Text("Transfer Host", color = Color(0xFF00C853))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { 
+                            showLeaveRoomDialog = false
+                            viewModel.leaveJamSession()
+                        }) {
+                            Text("Leave Anyway", color = Color.Red, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLeaveRoomDialog = false }) {
+                        Text("Cancel", color = Color.White)
+                    }
+                },
+                containerColor = Color(0xFF1E1E1E)
+            )
         }
     } // End of outer Box
     }

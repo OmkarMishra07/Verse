@@ -179,7 +179,11 @@ class VerseMusicService : MediaSessionService() {
         addSession(mediaSession!!)
 
         // Step 6: Noisy receiver for headphone unplug
-        registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(noisyReceiver, android.content.IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        }
         isReceiverRegistered = true
 
         // Step 7: Start observing ViewModel — each update calls invalidateState()

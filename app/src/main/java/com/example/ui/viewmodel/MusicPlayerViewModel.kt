@@ -221,6 +221,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _jammingRoomMessages = MutableStateFlow<List<com.example.data.remote.ChatMessage>>(emptyList())
     val jammingRoomMessages = _jammingRoomMessages.asStateFlow()
     
+    private val _typingUsers = MutableStateFlow<List<String>>(emptyList())
+    val typingUsers = _typingUsers.asStateFlow()
+    
     val isRtdbConnected = com.example.data.remote.JammingService.isRtdbConnected().stateIn(
         scope = viewModelScope,
         started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
@@ -253,7 +256,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val roomId = _jammingRoomId.value
         val track  = _currentTrack.value
         if (roomId.isNotBlank() && track != null) {
-            lastLocalActionTime = System.currentTimeMillis()
+            lastLocalActionTime = com.example.data.remote.JammingService.getTrueTime()
             com.example.data.remote.JammingService.updateRoomState(
                 roomId, if (includeTrackMetadata) track else null, _isPlaying.value, _currentPositionMs.value
             )
@@ -284,11 +287,11 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _playTrigger.value += 1
             com.example.WebViewHolder.loadVideo(track.id, 0, state.playing)
             trackChanged = true
-            lastTrackChangeTime = System.currentTimeMillis()
+            lastTrackChangeTime = com.example.data.remote.JammingService.getTrueTime()
             android.util.Log.d("JamSync", "Track changed to: ${state.currentTrackTitle}")
         }
 
-        val elapsed = System.currentTimeMillis() - state.updatedAt
+        val elapsed = com.example.data.remote.JammingService.getTrueTime() - state.updatedAt
         val expectedMs = if (state.playing) state.positionMs + elapsed else state.positionMs
         // Threshold set to 3000ms to prevent annoying micro-stutters every 6 seconds
         if (trackChanged || Math.abs(_currentPositionMs.value - expectedMs) > 3000) {
@@ -470,12 +473,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
         com.example.WebViewHolder.seekTo(positionMs / 1000f)
-        lastSeekTime = System.currentTimeMillis()
+        lastSeekTime = com.example.data.remote.JammingService.getTrueTime()
         lastSeekTargetMs = positionMs
 
         if (fromUser) {
             pushJammingState()
-            lastLocalActionTime = System.currentTimeMillis()
+            lastLocalActionTime = com.example.data.remote.JammingService.getTrueTime()
         }
     }
 
@@ -682,10 +685,17 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                                 _jammingRoomMessages.value = msgs
                             }
                         }
+                        launch {
+                            val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
+                            com.example.data.remote.JammingService.listenToTypingStatus(roomId, me).collect { typists ->
+                                _typingUsers.value = typists
+                            }
+                        }
                     }
                 } else {
                     _jammingRoomState.value = null
                     _jammingRoomMessages.value = emptyList()
+                    _typingUsers.value = emptyList()
                 }
             }
         }
@@ -873,10 +883,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _isLoading.value = false
             _currentPositionMs.value = 0L
             lastSeekTargetMs = 0L // Lock time updates until new video starts
-            lastSeekTime = System.currentTimeMillis()
+            lastSeekTime = com.example.data.remote.JammingService.getTrueTime()
             _currentTrack.value = resolved
             _isPlaying.value = true
-            lastTrackChangeTime = System.currentTimeMillis()
+            lastTrackChangeTime = com.example.data.remote.JammingService.getTrueTime()
             _playTrigger.value += 1
             com.example.WebViewHolder.loadVideo(resolved.id, 0, true)
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
@@ -1039,7 +1049,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setPlaying(playing: Boolean, fromUser: Boolean = false) {
-        if (!playing && (System.currentTimeMillis() - lastTrackChangeTime < 1500L)) {
+        if (!playing && (com.example.data.remote.JammingService.getTrueTime() - lastTrackChangeTime < 1500L)) {
             Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) right after track change")
             return
         }
@@ -1075,7 +1085,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         // for up to 3 seconds. Accept them once the player has landed near the target.
         if (lastSeekTargetMs >= 0L) {
             val diff = kotlin.math.abs(positionMs - lastSeekTargetMs)
-            val elapsed = System.currentTimeMillis() - lastSeekTime
+            val elapsed = com.example.data.remote.JammingService.getTrueTime() - lastSeekTime
             when {
                 diff <= 2000L -> {
                     // Player landed — clear seek lock and accept all updates normally
@@ -1102,7 +1112,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun checkAndPushPeriodicProgress() {
-        val now = System.currentTimeMillis()
+        val now = com.example.data.remote.JammingService.getTrueTime()
         val roomId = _jammingRoomId.value
         val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
         val isHost = _jammingRoomState.value?.hostName == me
@@ -1629,6 +1639,22 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             // Ignore
         }
         return list
+    }
+
+    fun leaveJamSession() {
+        val roomId = _jammingRoomId.value
+        if (roomId.isNotBlank()) {
+            val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: "Unknown"
+            viewModelScope.launch {
+                try {
+                    com.example.data.remote.JammingService.leaveRoom(roomId, me)
+                } finally {
+                    com.example.data.remote.JammingService.forceDisconnect()
+                }
+            }
+            setJammingRoomId("")
+            _currentScreen.value = ScreenType.EXPLORE
+        }
     }
 
     companion object {

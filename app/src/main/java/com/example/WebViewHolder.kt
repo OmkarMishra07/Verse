@@ -257,9 +257,10 @@ object WebViewHolder {
 /**
  * JS -> Kotlin bridge for the WebView player.
  */
-class PlayerBridge(private val fallbackViewModel: MusicPlayerViewModel? = null) {
+class PlayerBridge(fallbackViewModel: MusicPlayerViewModel? = null) {
+    private val fallbackVmRef = java.lang.ref.WeakReference(fallbackViewModel)
     private val activeViewModel: MusicPlayerViewModel?
-        get() = MusicPlayerViewModel.instance ?: fallbackViewModel
+        get() = MusicPlayerViewModel.instance ?: fallbackVmRef.get()
 
     // YouTube IFrame API error codes
     // 2: invalid parameter, 5: HTML5 error, 100: video not found,

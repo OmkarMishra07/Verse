@@ -153,6 +153,9 @@ dependencies {
   // Media3 for foreground MediaSessionService, notification, BT/headset/lock-screen
   implementation("androidx.media3:media3-session:1.4.1")
   implementation("androidx.media3:media3-common:1.4.1")
+  
+  // WorkManager for robust background room cleanup sweeps
+  implementation(libs.androidx.work.runtime)
 }
 
 tasks.register<Copy>("copyDebugApk") {
