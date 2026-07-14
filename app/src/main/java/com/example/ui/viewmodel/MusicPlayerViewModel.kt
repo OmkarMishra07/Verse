@@ -187,6 +187,21 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _partyTracks = MutableStateFlow<List<Track>>(emptyList())
     val partyTracks = _partyTracks.asStateFlow()
 
+    private val _hipHopTracks = MutableStateFlow<List<Track>>(emptyList())
+    val hipHopTracks = _hipHopTracks.asStateFlow()
+
+    private val _popTracks = MutableStateFlow<List<Track>>(emptyList())
+    val popTracks = _popTracks.asStateFlow()
+
+    private val _rockTracks = MutableStateFlow<List<Track>>(emptyList())
+    val rockTracks = _rockTracks.asStateFlow()
+
+    private val _rbTracks = MutableStateFlow<List<Track>>(emptyList())
+    val rbTracks = _rbTracks.asStateFlow()
+
+    private val _youtubeTop10 = MutableStateFlow<List<Track>>(emptyList())
+    val youtubeTop10 = _youtubeTop10.asStateFlow()
+
     private val _isExploreLoading = MutableStateFlow(false)
     val isExploreLoading = _isExploreLoading.asStateFlow()
 
@@ -206,8 +221,25 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _jammingRoomMessages = MutableStateFlow<List<com.example.data.remote.ChatMessage>>(emptyList())
     val jammingRoomMessages = _jammingRoomMessages.asStateFlow()
     
+    val isRtdbConnected = com.example.data.remote.JammingService.isRtdbConnected().stateIn(
+        scope = viewModelScope,
+        started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+        initialValue = false
+    )
+    
     fun setJammingRoomId(roomId: String) {
+        if (roomId.isNotBlank() && roomId != _jammingRoomId.value) {
+            // Reset local action time so we immediately accept the room's state upon joining
+            lastLocalActionTime = 0L
+        }
         _jammingRoomId.value = roomId
+    }
+
+    private val _showTimeLimitDialog = MutableStateFlow(false)
+    val showTimeLimitDialog = _showTimeLimitDialog.asStateFlow()
+    
+    fun dismissTimeLimitDialog() {
+        _showTimeLimitDialog.value = false
     }
 
     private var lastLocalActionTime = 0L
@@ -217,13 +249,13 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
      * Pushes playback state to RTDB (fire-and-forget — no coroutine needed since
      * updateRoomState is no longer suspend).
      */
-    fun pushJammingState() {
+    fun pushJammingState(includeTrackMetadata: Boolean = false) {
         val roomId = _jammingRoomId.value
         val track  = _currentTrack.value
         if (roomId.isNotBlank() && track != null) {
             lastLocalActionTime = System.currentTimeMillis()
             com.example.data.remote.JammingService.updateRoomState(
-                roomId, track, _isPlaying.value, _currentPositionMs.value
+                roomId, if (includeTrackMetadata) track else null, _isPlaying.value, _currentPositionMs.value
             )
         }
     }
@@ -241,6 +273,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         if (_isPlaying.value != state.playing) {
             _isPlaying.value = state.playing
+            if (state.playing) com.example.WebViewHolder.play() else com.example.WebViewHolder.pause()
         }
 
         val current = _currentTrack.value
@@ -249,6 +282,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val track = Track(id = state.currentTrackId, title = state.currentTrackTitle, artist = state.currentTrackArtist, thumbnailUrl = state.currentTrackThumbnail, duration = state.currentTrackDuration, album = "")
             _currentTrack.value = track
             _playTrigger.value += 1
+            com.example.WebViewHolder.loadVideo(track.id, 0, state.playing)
             trackChanged = true
             lastTrackChangeTime = System.currentTimeMillis()
             android.util.Log.d("JamSync", "Track changed to: ${state.currentTrackTitle}")
@@ -261,6 +295,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             android.util.Log.d("JamSync", "Seeking to ${expectedMs}ms (elapsed=${elapsed}ms, diff=${Math.abs(_currentPositionMs.value - expectedMs)}ms)")
             _currentPositionMs.value = expectedMs
             _seekRequestMs.value = expectedMs
+            com.example.WebViewHolder.seekTo(expectedMs / 1000f)
         }
     }
 
@@ -284,6 +319,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 val trendingResults = ITunesHelper.getTopSongs(isIndia)
                 _trendingSongs.value = trendingResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
                 
+                val ytTop10Query = if (isIndia) "top 10 trending hit songs india official music video" else "top 10 trending hit songs global official music video"
+                val ytTop10Results = YouTubeSearchHelper.search(ytTop10Query)
+                _youtubeTop10.value = ytTop10Results.take(10).map { it.toTrack("YouTube Music Top 10") }
+                
                 val albumsResults = ITunesHelper.getTopAlbums(isIndia)
                 _trendingAlbums.value = albumsResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
                 
@@ -301,6 +340,18 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
                 val partyResults = YouTubeSearchHelper.search(if (isIndia) "latest party dance hits punjabi bollywood" else "latest EDM dance club hits")
                 _partyTracks.value = partyResults.map { it.toTrack("Party & Dance") }
+
+                val hipHopResults = YouTubeSearchHelper.search(if (isIndia) "latest desi hip hop rap hits" else "latest global hip hop rap hit songs official music video")
+                _hipHopTracks.value = hipHopResults.map { it.toTrack("Hip-Hop & Rap") }
+
+                val popResults = YouTubeSearchHelper.search(if (isIndia) "top hit indie pop songs bollywood" else "top pop anthems hits official music video")
+                _popTracks.value = popResults.map { it.toTrack("Pop Anthems") }
+
+                val rockResults = YouTubeSearchHelper.search("top rock classics alternative indie hits")
+                _rockTracks.value = rockResults.map { it.toTrack("Rock & Indie") }
+
+                val rbResults = YouTubeSearchHelper.search("top trending r&b soul neo soul hits")
+                _rbTracks.value = rbResults.map { it.toTrack("R&B & Soul") }
             } catch (e: Exception) {
                 Log.e("MusicPlayerViewModel", "Error fetching explore content: ${e.message}")
             } finally {
@@ -418,21 +469,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun seekTo(positionMs: Long, fromUser: Boolean = false) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
+        com.example.WebViewHolder.seekTo(positionMs / 1000f)
         lastSeekTime = System.currentTimeMillis()
         lastSeekTargetMs = positionMs
 
-        // Only show loading if we have real buffer data AND seek is beyond buffered range
-        val buf = _bufferedFraction.value
-        if (buf > 0.05f && _durationMs.value > 0L) {
-            val targetFraction = positionMs.toFloat() / _durationMs.value.toFloat()
-            if (targetFraction > buf) {
-                _isLoading.value = true
-            }
+        if (fromUser) {
+            pushJammingState()
+            lastLocalActionTime = System.currentTimeMillis()
         }
-        // Only push to RTDB if this is a user-initiated seek, NOT a remote sync
-        if (fromUser) pushJammingState()
     }
-
 
     fun clearSeekRequest() {
         _seekRequestMs.value = null
@@ -606,12 +651,29 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             _jammingRoomId.collectLatest { roomId ->
                 if (roomId.isNotBlank()) {
+                    var timeLimitJob: kotlinx.coroutines.Job? = null
                     kotlinx.coroutines.coroutineScope {
                         launch {
                             com.example.data.remote.JammingService.listenToRoom(roomId).collect { room ->
                                 _jammingRoomState.value = room
                                 if (room != null) {
                                     syncFromRemote(room)
+                                    
+                                    // 2-hour limit enforcement
+                                    if (room.createdAt > 0) {
+                                        val elapsed = com.example.data.remote.JammingService.getTrueTime() - room.createdAt
+                                        val limit = 2 * 60 * 60 * 1000L // 2 hours
+                                        if (elapsed >= limit) {
+                                            enforceRoomTimeLimit()
+                                        } else {
+                                            if (timeLimitJob == null || !timeLimitJob!!.isActive) {
+                                                timeLimitJob = launch {
+                                                    kotlinx.coroutines.delay(limit - elapsed)
+                                                    enforceRoomTimeLimit()
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -629,8 +691,34 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         fetchExploreContent()
+    }
 
-        // Set anonymous Crashlytics user ID for crash clustering
+    private fun enforceRoomTimeLimit() {
+        val roomId = _jammingRoomId.value
+        val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
+        val isHost = _jammingRoomState.value?.hostName == me
+        
+        if (roomId.isNotBlank()) {
+            _showTimeLimitDialog.value = true
+            if (isHost) {
+                viewModelScope.launch {
+                    try {
+                        com.example.data.remote.JammingService.destroyRoom(roomId)
+                    } finally {
+                        // Drop the connection only after destruction completes (or fails)
+                        com.example.data.remote.JammingService.forceDisconnect()
+                    }
+                }
+            } else {
+                // Drop connection immediately for non-hosts
+                com.example.data.remote.JammingService.forceDisconnect()
+            }
+            setJammingRoomId("")
+        }
+    }
+
+    // Set anonymous Crashlytics user ID for crash clustering
+    init {
         viewModelScope.launch {
             currentUserId.let { uid ->
                 if (uid != null) {
@@ -790,8 +878,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _isPlaying.value = true
             lastTrackChangeTime = System.currentTimeMillis()
             _playTrigger.value += 1
+            com.example.WebViewHolder.loadVideo(resolved.id, 0, true)
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
-            pushJammingState()
+            pushJammingState(includeTrackMetadata = true)
             
             val roomId = _jammingRoomId.value
             if (roomId.isNotBlank()) {
@@ -910,7 +999,6 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     _queue.value = updated
                     _currentQueueIndex.value = 0
                 }
-                setScreen(ScreenType.NOW_PLAYING)
                 playResolvedTrack(track)
             }
         }
@@ -1018,9 +1106,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val roomId = _jammingRoomId.value
         val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
         val isHost = _jammingRoomState.value?.hostName == me
-        if (roomId.isNotBlank() && isHost && _isPlaying.value && (now - lastPeriodicPushTime >= 6000L)) {
+        // Increased heartbeat to 15 seconds to massively reduce bandwidth. Extrapolation handles the rest.
+        if (roomId.isNotBlank() && isHost && _isPlaying.value && (now - lastPeriodicPushTime >= 15000L)) {
             lastPeriodicPushTime = now
-            pushJammingState()
+            pushJammingState(includeTrackMetadata = false)
         }
     }
 

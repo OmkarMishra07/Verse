@@ -64,7 +64,7 @@ object ITunesHelper {
                 }
                 
                 // Make the artwork bigger by replacing dimensions in the URL
-                thumbnailUrl = thumbnailUrl.replace("55x55bb", "600x600bb").replace("170x170bb", "600x600bb")
+                thumbnailUrl = thumbnailUrl.replace("55x55bb", "1000x1000bb").replace("170x170bb", "1000x1000bb")
 
                 val idObj = entry.optJSONObject("id")
                 val attributes = idObj?.optJSONObject("attributes")

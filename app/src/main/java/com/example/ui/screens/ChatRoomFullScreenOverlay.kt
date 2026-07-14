@@ -254,7 +254,7 @@ fun ChatRoomFullScreenOverlay(
                     modifier = Modifier.fillMaxWidth().background(Color(0xFF161616).copy(alpha = 0.5f)).padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(model = currentTrack!!.thumbnailUrl, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+                    AsyncImage(model = currentTrack!!.thumbnailUrl.replace("hqdefault.jpg", "maxresdefault.jpg"), contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(currentTrack!!.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

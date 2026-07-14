@@ -240,6 +240,21 @@ fun iPodPlayerApp(
     val context = LocalContext.current
     val viewModel: MusicPlayerViewModel = viewModel()
     
+    // 2-hour Jam Session Limit Dialog
+    val showTimeLimitDialog by viewModel.showTimeLimitDialog.collectAsState()
+    if (showTimeLimitDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.dismissTimeLimitDialog() },
+            title = { androidx.compose.material3.Text("Room Time Limit Reached") },
+            text = { androidx.compose.material3.Text("This Jam Session has reached the maximum 2-hour time limit and has been automatically closed.\n\nIf you want to keep jamming, feel free to recreate a new room!") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { viewModel.dismissTimeLimitDialog() }) {
+                    androidx.compose.material3.Text("OK")
+                }
+            }
+        )
+    }
+
     // Greeting state
     var showGreeting by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
@@ -1862,7 +1877,7 @@ fun NowPlayingScreen(
                 ) {
                     if (currentTrack != null) {
                         AsyncImage(
-                            model = currentTrack!!.thumbnailUrl,
+                            model = currentTrack!!.thumbnailUrl.replace("hqdefault.jpg", "maxresdefault.jpg"),
                             contentDescription = "Cover Art",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -2222,11 +2237,36 @@ fun JammingScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var showParticipantsOverlay by remember { mutableStateOf(false) }
 
-    // Auto-leave if kicked by host
-    LaunchedEffect(roomState, jammingRoomId, myName) {
+    val isConnected by viewModel.isRtdbConnected.collectAsState()
+
+    // Handle Kicks and Reconnections
+    LaunchedEffect(roomState, jammingRoomId, myName, isConnected) {
         if (jammingRoomId.isNotBlank() && roomState != null) {
-            if (!roomState!!.participants.contains(myName)) {
+            
+            // 1. Check if officially kicked by host
+            if (roomState!!.kicked.contains(myName)) {
+                android.widget.Toast.makeText(context, "You were kicked by the host.", android.widget.Toast.LENGTH_LONG).show()
                 viewModel.setJammingRoomId("")
+                showParticipantsOverlay = false
+                return@LaunchedEffect
+            }
+
+            // 2. Rejoin if connection is active but we are missing from participants
+            val inParticipantList = roomState!!.participants.contains(myName)
+            if (isConnected && !inParticipantList) {
+                com.example.data.remote.JammingService.rejoinRoom(jammingRoomId, myName)
+            }
+        }
+    }
+
+    // Handle 2-minute offline kick
+    LaunchedEffect(isConnected, jammingRoomId) {
+        if (jammingRoomId.isNotBlank() && !isConnected) {
+            kotlinx.coroutines.delay(120_000L) // 2 minutes
+            if (viewModel.jammingRoomId.value == jammingRoomId && !viewModel.isRtdbConnected.value) {
+                android.widget.Toast.makeText(context, "Connection lost for 2 minutes. Leaving room.", android.widget.Toast.LENGTH_LONG).show()
+                viewModel.setJammingRoomId("")
+                com.example.data.remote.JammingService.forceDisconnect() // Free up 100 connection bottleneck
                 showParticipantsOverlay = false
             }
         }
@@ -2245,6 +2285,29 @@ fun JammingScreen(
             Text("Jamming Session", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             Text("Listen together with friends in real-time", color = Color.Gray, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Time limit notice
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFF57C00).copy(alpha = 0.15f) // Subtle amber/orange
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = "Info", tint = Color(0xFFFFB74D), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Jam Rooms are available for 2 hours and will be automatically destroyed.",
+                        color = Color(0xFFFFB74D),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(32.dp))
             OutlinedTextField(
                 value = inputRoomCode,
@@ -2282,6 +2345,7 @@ fun JammingScreen(
                     val success = com.example.data.remote.JammingService.createRoom(code, currentUser?.uid ?: "host", myName) 
                     if (success) {
                         viewModel.setJammingRoomId(code)
+                        viewModel.pushJammingState(includeTrackMetadata = true)
                     } else {
                         android.widget.Toast.makeText(context, "Failed to create room.", android.widget.Toast.LENGTH_SHORT).show()
                     }
@@ -2331,6 +2395,14 @@ fun JammingScreen(
                     Text("${roomState?.hostName ?: "Unknown"}'s Room", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Code: $jammingRoomId", color = iPodAccentBlue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        
+                        if (!isConnected) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(color = Color.Red.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                Text("Reconnecting...", color = Color.Red, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+
                         Spacer(modifier = Modifier.width(12.dp))
                         
                         val participantsCount = roomState?.participants?.size ?: 0
@@ -2555,6 +2627,11 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val globalOrLocalHits by viewModel.globalOrLocalHits.collectAsState()
     val moodTracks by viewModel.moodTracks.collectAsState()
     val partyTracks by viewModel.partyTracks.collectAsState()
+    val hipHopTracks by viewModel.hipHopTracks.collectAsState()
+    val popTracks by viewModel.popTracks.collectAsState()
+    val rockTracks by viewModel.rockTracks.collectAsState()
+    val rbTracks by viewModel.rbTracks.collectAsState()
+    val youtubeTop10 by viewModel.youtubeTop10.collectAsState()
     val isLoading by viewModel.isExploreLoading.collectAsState()
     
     val pageScrollState = rememberScrollState()
@@ -2565,11 +2642,16 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val globalLocalRowState = rememberLazyListState()
     val moodRowState = rememberLazyListState()
     val partyRowState = rememberLazyListState()
+    val hipHopRowState = rememberLazyListState()
+    val popRowState = rememberLazyListState()
+    val rockRowState = rememberLazyListState()
+    val rbRowState = rememberLazyListState()
+    val ytTop10RowState = rememberLazyListState()
 
     val top10RowState = rememberLazyListState()
     val top10Hits = trendingSongs.take(10)
 
-    val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits + globalOrLocalHits + moodTracks + partyTracks
+    val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits + globalOrLocalHits + moodTracks + partyTracks + hipHopTracks + popTracks + rockTracks + rbTracks + youtubeTop10
 
     LaunchedEffect(focusedIndex) {
         if (flatList.isEmpty()) return@LaunchedEffect
@@ -2594,9 +2676,24 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size) {
             val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size
             moodRowState.animateScrollToItem(maxOf(0, idx))
-        } else if (focusedIndex < flatList.size) {
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size) {
             val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size
             partyRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size - partyTracks.size
+            hipHopRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size - partyTracks.size - hipHopTracks.size
+            popRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size - partyTracks.size - hipHopTracks.size - popTracks.size
+            rockRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size + rbTracks.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size - partyTracks.size - hipHopTracks.size - popTracks.size - rockTracks.size
+            rbRowState.animateScrollToItem(maxOf(0, idx))
+        } else if (focusedIndex < flatList.size) {
+            val idx = focusedIndex - top10Hits.size - trendingSongs.size - trendingAlbums.size - newReleases.size - bollywoodHits.size - globalOrLocalHits.size - moodTracks.size - partyTracks.size - hipHopTracks.size - popTracks.size - rockTracks.size - rbTracks.size
+            ytTop10RowState.animateScrollToItem(maxOf(0, idx))
         }
     }
 
@@ -2807,6 +2904,85 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (hipHopTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Hip-Hop & Rap Hits", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Hip-Hop & Rap Hits", hipHopTracks) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size
+            LazyRow(state = hipHopRowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                itemsIndexed(hipHopTracks.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (popTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Pop Anthems", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Pop Anthems", popTracks) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size
+            LazyRow(state = popRowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                itemsIndexed(popTracks.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (rockTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Rock & Indie Classics", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Rock & Indie Classics", rockTracks) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size
+            LazyRow(state = rockRowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                itemsIndexed(rockTracks.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (rbTracks.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("R&B & Soul Hits", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("R&B & Soul Hits", rbTracks) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size
+            LazyRow(state = rbRowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                itemsIndexed(rbTracks.take(15)) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (youtubeTop10.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("YouTube Music Top 10", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("YouTube Music Top 10", youtubeTop10) })
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size + rbTracks.size
+            LazyRow(state = ytTop10RowState, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                itemsIndexed(youtubeTop10) { index, track ->
+                    val isFocused = (index + offset) == focusedIndex
+                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                }
+            }
             Spacer(modifier = Modifier.height(28.dp))
         }
 

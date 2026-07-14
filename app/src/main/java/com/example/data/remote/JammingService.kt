@@ -12,6 +12,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import com.google.firebase.database.ServerValue
 
 // ─── Data Models (identical to GOATU) ────────────────────────────────────────
 
@@ -27,7 +28,9 @@ data class JammingRoom(
     val playing: Boolean = false,
     val positionMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
+    val createdAt: Long = 0L, // Used for 2-hour room limit
     val participants: List<String> = emptyList(),
+    val kicked: List<String> = emptyList(),
     val lastActivityTimestamp: com.google.firebase.Timestamp? = null
 )
 
@@ -49,6 +52,37 @@ object JammingService {
     private val rtdb = FirebaseDatabase.getInstance("https://verse-d9583-default-rtdb.asia-southeast1.firebasedatabase.app")
     private const val TAG = "JammingService"
 
+    private var serverTimeOffset: Long = 0L
+
+    init {
+        // Force RTDB to stay offline by default so we don't consume concurrent connections
+        // when users are just browsing their local library.
+        rtdb.goOffline()
+        
+        // Track true server time to prevent local clock manipulation
+        rtdb.getReference(".info/serverTimeOffset").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                serverTimeOffset = snapshot.getValue(Long::class.java) ?: 0L
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    fun isRtdbConnected(): Flow<Boolean> = callbackFlow {
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                trySend(snapshot.getValue(Boolean::class.java) ?: false)
+            }
+            override fun onCancelled(error: DatabaseError) {
+                trySend(false)
+            }
+        }
+        rtdb.getReference(".info/connected").addValueEventListener(listener)
+        awaitClose { rtdb.getReference(".info/connected").removeEventListener(listener) }
+    }
+
+    fun getTrueTime() = System.currentTimeMillis() + serverTimeOffset
+
     // Firestore — room metadata (participants, host) + chat messages
     private fun roomsCol()                       = db.collection("jamming_rooms")
     private fun messagesCol(roomId: String)       = roomsCol().document(roomId).collection("messages")
@@ -58,7 +92,12 @@ object JammingService {
 
     // ─── Room Lifecycle ───────────────────────────────────────────────────────
 
+    fun forceDisconnect() {
+        rtdb.goOffline()
+    }
+
     suspend fun createRoom(roomId: String, hostId: String, hostName: String): Boolean {
+        rtdb.goOnline()
         return try {
             val room = JammingRoom(
                 roomId   = roomId,
@@ -72,16 +111,20 @@ object JammingService {
             // RTDB — seed participants + hostName so listenToRoom can serve kick-out check
             rtdbStateRef(roomId).updateChildren(mapOf<String, Any>(
                 "hostName" to hostName,
+                "createdAt" to ServerValue.TIMESTAMP,
                 "participants/${hostName}" to true
             ))
+            rtdbStateRef(roomId).child("participants/${hostName}").onDisconnect().removeValue()
             true
         } catch (e: Exception) {
             Log.e(TAG, "createRoom failed", e)
+            rtdb.goOffline()
             false
         }
     }
 
     suspend fun joinRoom(roomId: String, participantName: String): String {
+        rtdb.goOnline()
         val roomRef = roomsCol().document(roomId)
         return try {
             val result = db.runTransaction { transaction ->
@@ -111,13 +154,35 @@ object JammingService {
             
             if (result == "SUCCESS") {
                 // Mirror participant in RTDB for kick-out check in listenToRoom
-                rtdbStateRef(roomId).child("participants/$participantName").setValue(true)
+                val pRef = rtdbStateRef(roomId).child("participants/$participantName")
+                pRef.setValue(true)
+                pRef.onDisconnect().removeValue()
                 sendMessage(roomId, "System", "$participantName joined the jam", isSystemMessage = true)
+            } else {
+                rtdb.goOffline() // Failed to join, so don't leave connection hanging!
             }
             result
         } catch (e: Exception) {
             Log.e(TAG, "joinRoom failed", e)
-            "ERROR"
+            rtdb.goOffline() // Failed to join
+            "ERROR_UNKNOWN"
+        }
+    }
+
+    fun rejoinRoom(roomId: String, participantName: String) {
+        // Only run if we are actually still in the JammingRoom in Firestore?
+        // Let's assume the caller verifies they shouldn't have been kicked
+        val pRef = rtdbStateRef(roomId).child("participants/$participantName")
+        pRef.setValue(true)
+        pRef.onDisconnect().removeValue()
+    }
+
+    suspend fun destroyRoom(roomId: String) {
+        try {
+            roomsCol().document(roomId).delete().await()
+            rtdb.getReference("jamming_rooms/$roomId").removeValue()
+        } catch (e: Exception) {
+            Log.e(TAG, "destroyRoom failed", e)
         }
     }
 
@@ -160,6 +225,13 @@ object JammingService {
             } else {
                 sendMessage(roomId, "System", "$participantName left the jam", isSystemMessage = true)
                 rtdbStateRef(roomId).child("participants/$participantName").removeValue()
+                
+                val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName
+                if (participantName != currentUser) {
+                    // Host is kicking someone else, mark them as officially kicked so their app auto-leaves
+                    rtdbStateRef(roomId).child("kicked/$participantName").setValue(System.currentTimeMillis())
+                }
+
                 rtdb.getReference("jamming_rooms/$roomId/typing/$participantName").removeValue()
                 
                 if (result.startsWith("MIGRATED_")) {
@@ -168,9 +240,21 @@ object JammingService {
                     sendMessage(roomId, "System", "👑 $newHost is now the Host!", isSystemMessage = true)
                 }
             }
+            
+            // Only drop the RTDB connection if the CURRENT user is the one leaving.
+            // If the host is kicking someone else, we don't want the host to go offline!
+            val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName
+            if (participantName == currentUser) {
+                rtdb.goOffline()
+            }
+            
             true
         } catch (e: Exception) {
             Log.e(TAG, "leaveRoom failed", e)
+            val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName
+            if (participantName == currentUser) {
+                rtdb.goOffline()
+            }
             false
         }
     }
@@ -226,6 +310,10 @@ object JammingService {
                 val participants = snapshot.child("participants").children
                     .mapNotNull { it.key }
                     .toList()
+                
+                val kicked = snapshot.child("kicked").children
+                    .mapNotNull { it.key }
+                    .toList()
 
                 val room = JammingRoom(
                     roomId                = roomId,
@@ -238,7 +326,9 @@ object JammingService {
                     playing               = snapshot.child("playing").getValue(Boolean::class.java) ?: false,
                     positionMs            = snapshot.child("positionMs").getValue(Long::class.java) ?: 0L,
                     updatedAt             = snapshot.child("updatedAt").getValue(Long::class.java) ?: System.currentTimeMillis(),
-                    participants          = participants
+                    createdAt             = snapshot.child("createdAt").getValue(Long::class.java) ?: 0L,
+                    participants          = participants,
+                    kicked                = kicked
                 )
                 Log.d(TAG, "RTDB room update: track=${room.currentTrackId.take(8)}, playing=${room.playing}, pos=${room.positionMs}ms, participants=$participants")
                 trySend(room)

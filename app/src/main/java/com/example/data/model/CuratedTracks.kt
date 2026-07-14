@@ -7,7 +7,7 @@ object CuratedTracks {
             title = "Good Days",
             artist = "SZA",
             album = "SOS",
-            thumbnailUrl = "https://img.youtube.com/vi/S9O_W6y0668/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/S9O_W6y0668/maxresdefault.jpg",
             duration = "4:40"
         ),
         Track(
@@ -15,7 +15,7 @@ object CuratedTracks {
             title = "Kill Bill",
             artist = "SZA",
             album = "SOS",
-            thumbnailUrl = "https://img.youtube.com/vi/MSRcC6shJD4/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/MSRcC6shJD4/maxresdefault.jpg",
             duration = "2:33"
         ),
         Track(
@@ -23,7 +23,7 @@ object CuratedTracks {
             title = "Snooze",
             artist = "SZA",
             album = "SOS",
-            thumbnailUrl = "https://img.youtube.com/vi/LDY_XGv76kM/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/LDY_XGv76kM/maxresdefault.jpg",
             duration = "3:21"
         ),
         Track(
@@ -31,7 +31,7 @@ object CuratedTracks {
             title = "Blinding Lights",
             artist = "The Weeknd",
             album = "After Hours",
-            thumbnailUrl = "https://img.youtube.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/4NRXx6U8ABQ/maxresdefault.jpg",
             duration = "3:21"
         ),
         Track(
@@ -39,7 +39,7 @@ object CuratedTracks {
             title = "Starboy",
             artist = "The Weeknd",
             album = "Starboy",
-            thumbnailUrl = "https://img.youtube.com/vi/34Na43OfxLY/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/34Na43OfxLY/maxresdefault.jpg",
             duration = "3:50"
         ),
         Track(
@@ -47,7 +47,7 @@ object CuratedTracks {
             title = "Save Your Tears",
             artist = "The Weeknd",
             album = "After Hours",
-            thumbnailUrl = "https://img.youtube.com/vi/XXYlSFmSTxs/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/XXYlSFmSTxs/maxresdefault.jpg",
             duration = "3:35"
         )
     )
@@ -58,7 +58,7 @@ object CuratedTracks {
             title = "Get Lucky",
             artist = "Daft Punk ft. Pharrell",
             album = "Random Access Memories",
-            thumbnailUrl = "https://img.youtube.com/vi/5NV6Rdv1a0w/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/5NV6Rdv1a0w/maxresdefault.jpg",
             duration = "4:08"
         ),
         Track(
@@ -66,7 +66,7 @@ object CuratedTracks {
             title = "Instant Crush",
             artist = "Daft Punk ft. Julian Casablancas",
             album = "Random Access Memories",
-            thumbnailUrl = "https://img.youtube.com/vi/a5uQMwRMHcs/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/a5uQMwRMHcs/maxresdefault.jpg",
             duration = "5:37"
         ),
         Track(
@@ -74,7 +74,7 @@ object CuratedTracks {
             title = "One More Time",
             artist = "Daft Punk",
             album = "Discovery",
-            thumbnailUrl = "https://img.youtube.com/vi/FGBhQAkFHWY/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/FGBhQAkFHWY/maxresdefault.jpg",
             duration = "5:20"
         )
     )
@@ -85,7 +85,7 @@ object CuratedTracks {
             title = "As It Was",
             artist = "Harry Styles",
             album = "Harry's House",
-            thumbnailUrl = "https://img.youtube.com/vi/H5v3kku4y6Q/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/H5v3kku4y6Q/maxresdefault.jpg",
             duration = "2:47"
         ),
         Track(
@@ -93,7 +93,7 @@ object CuratedTracks {
             title = "Cruel Summer",
             artist = "Taylor Swift",
             album = "Lover",
-            thumbnailUrl = "https://img.youtube.com/vi/tCXGJQYZ9JA/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/tCXGJQYZ9JA/maxresdefault.jpg",
             duration = "2:58"
         ),
         Track(
@@ -101,7 +101,7 @@ object CuratedTracks {
             title = "Anti-Hero",
             artist = "Taylor Swift",
             album = "Midnights",
-            thumbnailUrl = "https://img.youtube.com/vi/b1kbLwvqugk/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/b1kbLwvqugk/maxresdefault.jpg",
             duration = "3:20"
         ),
         Track(
@@ -109,7 +109,7 @@ object CuratedTracks {
             title = "Not Like Us",
             artist = "Kendrick Lamar",
             album = "Single",
-            thumbnailUrl = "https://img.youtube.com/vi/T6eK-mAk_Zs/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/T6eK-mAk_Zs/maxresdefault.jpg",
             duration = "4:34"
         ),
         Track(
@@ -117,7 +117,7 @@ object CuratedTracks {
             title = "Sunflower",
             artist = "Post Malone & Swae Lee",
             album = "Spider-Man",
-            thumbnailUrl = "https://img.youtube.com/vi/ApXoWvhIecU/hqdefault.jpg",
+            thumbnailUrl = "https://img.youtube.com/vi/ApXoWvhIecU/maxresdefault.jpg",
             duration = "2:37"
         )
     )
