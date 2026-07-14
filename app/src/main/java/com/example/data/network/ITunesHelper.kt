@@ -37,6 +37,12 @@ object ITunesHelper {
         return fetchEntries(url)
     }
 
+    suspend fun getTopSongsForGenre(isIndia: Boolean, genreId: Int, limit: Int = 15): List<ITunesEntry> {
+        val region = if (isIndia) "in" else "us"
+        val url = "https://itunes.apple.com/$region/rss/topsongs/limit=$limit/genre=$genreId/json"
+        return fetchEntries(url)
+    }
+
     private suspend fun fetchEntries(url: String): List<ITunesEntry> = withContext(Dispatchers.IO) {
         val results = mutableListOf<ITunesEntry>()
         try {

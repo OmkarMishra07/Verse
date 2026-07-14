@@ -55,8 +55,10 @@ object YouTubeSearchHelper {
             
             // We split the HTML page by "videoRenderer" to isolate each search result block
             val parts = html.split("\"videoRenderer\":")
+            val rawResults = mutableListOf<Pair<YouTubeVideo, Int>>()
+            
             for (i in 1 until parts.size) {
-                if (results.size >= 15) break
+                if (rawResults.size >= 25) break
                 val part = parts[i].take(3500)
                 
                 // Extract videoId
@@ -71,6 +73,26 @@ object YouTubeSearchHelper {
                     title = extractValue(part, "\"title\":.*?\"text\":\"([^\"]+)\"")
                 }
                 title = title?.replace("\\u0026", "&")?.replace("\\\"", "\"") ?: "Unknown Video"
+
+                // Exclude videos whose title contains common compilation keywords
+                val lowerTitle = title.lowercase()
+                val isCompilation = lowerTitle.contains("jukebox") || 
+                                    lowerTitle.contains("playlist") || 
+                                    (lowerTitle.contains("mix") && !lowerTitle.contains("remix")) || 
+                                    lowerTitle.contains("mashup") || 
+                                    lowerTitle.contains("nonstop") || 
+                                    lowerTitle.contains("full album") || 
+                                    lowerTitle.contains("full movie songs") || 
+                                    lowerTitle.contains("collection") || 
+                                    lowerTitle.contains("compilation") || 
+                                    lowerTitle.contains("best songs") || 
+                                    lowerTitle.contains("top songs") || 
+                                    lowerTitle.contains("all songs") || 
+                                    lowerTitle.contains("medley") || 
+                                    lowerTitle.contains("dj mix") || 
+                                    lowerTitle.contains("live stream") || 
+                                    lowerTitle.contains("live-stream")
+                if (isCompilation) continue
 
                 // Extract Artist / Channel Name
                 var artist = extractValue(part, "\"ownerText\":\\{\"runs\":\\[\\{\"text\":\"([^\"]+)\"\\}\\]")
@@ -87,18 +109,33 @@ object YouTubeSearchHelper {
                     ?: extractValue(part, "\"simpleText\":\"([0-9:]{2,5})\"")
                     ?: "3:30"
 
+                // Exclude videos longer than 10 minutes (playlists/long mixes)
+                val cleanDuration = duration.trim()
+                val durationParts = cleanDuration.split(":")
+                if (durationParts.size > 2) {
+                    val hours = durationParts[0].toIntOrNull() ?: 0
+                    val mins = durationParts[1].toIntOrNull() ?: 0
+                    val totalMinutes = (hours * 60) + mins
+                    if (totalMinutes > 10) continue
+                } else if (durationParts.size == 2) {
+                    val mins = durationParts[0].toIntOrNull() ?: 0
+                    if (mins > 10) continue
+                }
+
                 val thumbnailUrl = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
-                
-                results.add(
-                    YouTubeVideo(
-                        videoId = videoId,
-                        title = title,
-                        artist = artist,
-                        thumbnailUrl = thumbnailUrl,
-                        duration = duration
-                    )
+                val video = YouTubeVideo(
+                    videoId = videoId,
+                    title = title,
+                    artist = artist,
+                    thumbnailUrl = thumbnailUrl,
+                    duration = duration
                 )
+                val score = getPriorityScore(title, artist, duration)
+                rawResults.add(Pair(video, score))
             }
+            
+            // Sort by priority score in descending order and populate final results
+            results.addAll(rawResults.sortedByDescending { it.second }.map { it.first })
         } catch (e: Exception) {
             Log.e(TAG, "Error searching YouTube: ${e.message}", e)
             FirebaseCrashlytics.getInstance().log("YouTubeSearch failed for query='${query.take(50)}'")
@@ -107,6 +144,35 @@ object YouTubeSearchHelper {
         
         // Return results, falling back to empty if failed
         results
+    }
+
+    private fun getPriorityScore(title: String, channelName: String, duration: String): Int {
+        var score = 0
+        val lowerTitle = title.lowercase()
+        val lowerChannel = channelName.lowercase()
+        
+        val officialLabels = listOf(
+            "t-series", "sony music", "saregama", "zee music", "universal music", 
+            "warner music", "yrf", "vevo", "official artist channel", "soundtrack",
+            "tseries", "zee music company", "yash raj films", "saregama music"
+        )
+        if (officialLabels.any { lowerChannel.contains(it) }) {
+            score += 100
+        }
+        
+        if (lowerTitle.contains("official video") || lowerTitle.contains("official audio") || lowerTitle.contains("lyric video")) {
+            score += 50
+        }
+        
+        val parts = duration.split(":")
+        if (parts.size == 2) {
+            val mins = parts[0].toIntOrNull() ?: 0
+            if (mins in 2..6) {
+                score += 30
+            }
+        }
+        
+        return score
     }
 
     private fun extractValue(text: String, regex: String): String? {

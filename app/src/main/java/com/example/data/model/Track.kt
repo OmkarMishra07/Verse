@@ -5,6 +5,7 @@ import com.example.data.local.PlaylistSong
 import com.example.data.local.RecentlyPlayed
 import com.example.data.network.YouTubeVideo
 
+@androidx.compose.runtime.Immutable
 data class Track(
     val id: String, // YouTube Video ID
     val title: String,

@@ -20,9 +20,31 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
+
+data class ExploreUiState(
+    val trendingSongs: List<Track> = emptyList(),
+    val trendingAlbums: List<Track> = emptyList(),
+    val newReleases: List<Track> = emptyList(),
+    val youtubeTop10: List<Track> = emptyList(),
+    val bollywoodHits: List<Track> = emptyList(),
+    val globalHits: List<Track> = emptyList(),
+    val moodTracks: List<Track> = emptyList(),
+    val partyTracks: List<Track> = emptyList(),
+    val hipHopTracks: List<Track> = emptyList(),
+    val popTracks: List<Track> = emptyList(),
+    val rockTracks: List<Track> = emptyList(),
+    val rbTracks: List<Track> = emptyList()
+)
+
+data class ExploreCacheEntry(
+    val tracks: List<Track>,
+    val timestamp: Long
+)
 
 enum class ScreenType(val title: String) {
     EXPLORE("Explore"),
@@ -205,6 +227,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _isExploreLoading = MutableStateFlow(false)
     val isExploreLoading = _isExploreLoading.asStateFlow()
 
+    private val _activeLoadingSections = MutableStateFlow<Set<String>>(emptySet())
+    val activeLoadingSections = _activeLoadingSections.asStateFlow()
+
     private val _sectionDetailTitle = MutableStateFlow("")
     val sectionDetailTitle = _sectionDetailTitle.asStateFlow()
 
@@ -310,55 +335,462 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun setExploreRegion(region: ExploreRegion) {
         _exploreRegion.value = region
-        fetchExploreContent()
+        // We do not clear the cache or empty the lists to keep layout measurements stable
+        // and enable instant rendering for previously cached regions.
+        prefetchExplore()
     }
 
-    private fun fetchExploreContent() {
+    private val moshi = com.squareup.moshi.Moshi.Builder()
+        .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+        .build()
+    private val trackListAdapter = moshi.adapter<List<Track>>(
+        com.squareup.moshi.Types.newParameterizedType(List::class.java, Track::class.java)
+    )
+
+    private val exploreCache = mutableMapOf<String, ExploreCacheEntry>()
+    private val loadingSections = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    fun prefetchExplore() {
+        loadSection("trending")
+        loadSection("albums")
+
+        // Staleness check: Trigger background scrape work if cache is missing or older than 24 hours
         viewModelScope.launch {
-            _isExploreLoading.value = true
             try {
-                val isIndia = _exploreRegion.value == ExploreRegion.INDIA
-                
-                val trendingResults = ITunesHelper.getTopSongs(isIndia)
-                _trendingSongs.value = trendingResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
-                
-                val ytTop10Query = if (isIndia) "top 10 trending hit songs india official music video" else "top 10 trending hit songs global official music video"
-                val ytTop10Results = YouTubeSearchHelper.search(ytTop10Query)
-                _youtubeTop10.value = ytTop10Results.take(10).map { it.toTrack("YouTube Music Top 10") }
-                
-                val albumsResults = ITunesHelper.getTopAlbums(isIndia)
-                _trendingAlbums.value = albumsResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
-                
-                val newReleasesResults = ITunesHelper.getNewReleases(isIndia)
-                _newReleases.value = newReleasesResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
-
-                val bollywoodResults = YouTubeSearchHelper.search("latest trending bollywood hit songs")
-                _bollywoodHits.value = bollywoodResults.map { it.toTrack("Bollywood Hits") }
-
-                val globalLocalResults = ITunesHelper.getTopSongs(!isIndia)
-                _globalOrLocalHits.value = globalLocalResults.map { Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "") }
-
-                val moodResults = YouTubeSearchHelper.search(if (isIndia) "latest romantic lo-fi chill indian songs" else "latest chill vibes lofi pop songs")
-                _moodTracks.value = moodResults.map { it.toTrack("Mood & Chill") }
-
-                val partyResults = YouTubeSearchHelper.search(if (isIndia) "latest party dance hits punjabi bollywood" else "latest EDM dance club hits")
-                _partyTracks.value = partyResults.map { it.toTrack("Party & Dance") }
-
-                val hipHopResults = YouTubeSearchHelper.search(if (isIndia) "latest desi hip hop rap hits" else "latest global hip hop rap hit songs official music video")
-                _hipHopTracks.value = hipHopResults.map { it.toTrack("Hip-Hop & Rap") }
-
-                val popResults = YouTubeSearchHelper.search(if (isIndia) "top hit indie pop songs bollywood" else "top pop anthems hits official music video")
-                _popTracks.value = popResults.map { it.toTrack("Pop Anthems") }
-
-                val rockResults = YouTubeSearchHelper.search("top rock classics alternative indie hits")
-                _rockTracks.value = rockResults.map { it.toTrack("Rock & Indie") }
-
-                val rbResults = YouTubeSearchHelper.search("top trending r&b soul neo soul hits")
-                _rbTracks.value = rbResults.map { it.toTrack("R&B & Soul") }
+                val testCache = songDao.getExploreCache("bollywood_INDIA")
+                val now = System.currentTimeMillis()
+                if (testCache == null || (now - testCache.lastScrapedAt) > 24 * 60 * 60 * 1000L) {
+                    Log.d("MusicPlayerViewModel", "Explore cache stale/missing. Triggering background refresh...")
+                    val oneTimeRequest = androidx.work.OneTimeWorkRequestBuilder<com.example.data.remote.ExploreRefreshWorker>()
+                        .setConstraints(
+                            androidx.work.Constraints.Builder()
+                                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                                .build()
+                        )
+                        .build()
+                    androidx.work.WorkManager.getInstance(getApplication()).enqueueUniqueWork(
+                        "ExploreOneTimeRefreshWork",
+                        androidx.work.ExistingWorkPolicy.KEEP,
+                        oneTimeRequest
+                    )
+                }
             } catch (e: Exception) {
-                Log.e("MusicPlayerViewModel", "Error fetching explore content: ${e.message}")
+                Log.e("MusicPlayerViewModel", "Staleness check failed", e)
+            }
+        }
+    }
+
+    private fun isYouTubeSection(section: String): Boolean {
+        return when (section) {
+            "top10", "bollywood", "mood", "party", "hiphop", "pop", "rock", "rb" -> true
+            else -> false
+        }
+    }
+
+    private fun updateUiState(section: String, tracks: List<Track>) {
+        when (section) {
+            "trending" -> _trendingSongs.value = tracks
+            "albums" -> _trendingAlbums.value = tracks
+            "releases" -> _newReleases.value = tracks
+            "global_local" -> _globalOrLocalHits.value = tracks
+            "top10" -> _youtubeTop10.value = tracks
+            "bollywood" -> _bollywoodHits.value = tracks
+            "mood" -> _moodTracks.value = tracks
+            "party" -> _partyTracks.value = tracks
+            "hiphop" -> _hipHopTracks.value = tracks
+            "pop" -> _popTracks.value = tracks
+            "rock" -> _rockTracks.value = tracks
+            "rb" -> _rbTracks.value = tracks
+        }
+    }
+
+    private fun getDailyQueryForSection(section: String, isIndia: Boolean): String {
+        val calendar = java.util.Calendar.getInstance()
+        val day = calendar.get(java.util.Calendar.DAY_OF_WEEK)
+        
+        return when (section) {
+            "bollywood" -> when (day) {
+                1 -> "bollywood romantic official music video T-Series"
+                2 -> "latest new hindi songs Sony Music"
+                3 -> "bollywood dance party hits Zee Music Company"
+                4 -> "new hindi movie songs YRF official audio"
+                5 -> "bollywood slow acoustic chill T-Series"
+                6 -> "new bollywood releases official music video"
+                else -> "bollywood top charts weekly Sony Music"
+            }
+            "mood" -> if (isIndia) {
+                when (day) {
+                    1 -> "hindi romantic lo-fi chill songs T-Series"
+                    2 -> "latest bollywood lo-fi hits Sony Music"
+                    3 -> "acoustic hindi cover songs Zee Music"
+                    4 -> "hindi slow reverb chill hits T-Series"
+                    5 -> "indie pop hindi chill tracks"
+                    6 -> "hindi lofi beats study mix"
+                    else -> "punjabi romantic slow tracks official audio"
+                }
+            } else {
+                when (day) {
+                    1 -> "lo-fi chill beats study focus instrumental"
+                    2 -> "ambient sleep relaxing soundscape"
+                    3 -> "acoustic pop cover chill sessions Vevo"
+                    4 -> "indie pop bedroom lo-fi"
+                    5 -> "chill r&b groove tracks official audio"
+                    6 -> "jazz hop coffee shop beats"
+                    else -> "lo-fi hip hop synthwave chill"
+                }
+            }
+            "party" -> if (isIndia) {
+                when (day) {
+                    1 -> "bollywood party remix songs club mix"
+                    2 -> "punjabi party dance hits official audio"
+                    3 -> "latest bollywood club mix Zee Music"
+                    4 -> "punjabi dj non stop dance tracks"
+                    5 -> "desi hip hop party club hits"
+                    6 -> "bollywood item songs dance collection T-Series"
+                    else -> "bollywood wedding party hits Sony Music"
+                }
+            } else {
+                when (day) {
+                    1 -> "sunday chill house music lounge"
+                    2 -> "edm dance club hits Ultra Music"
+                    3 -> "tomorrowland electronic festival tracks Spinnin Records"
+                    4 -> "deep house groove mix Anjunadeep"
+                    5 -> "electro pop dance anthems Vevo"
+                    6 -> "party dance club hits Monstercat"
+                    else -> "weekend party remix tracks Ultra Music"
+                }
+            }
+            "hiphop" -> if (isIndia) {
+                when (day) {
+                    1 -> "desi hip hop rap hits gully gang"
+                    2 -> "latest punjabi rap songs official video"
+                    3 -> "gully rap hindi hip hop Mass Appeal"
+                    4 -> "indian underground rap tracks"
+                    5 -> "hindi rap drill audio"
+                    6 -> "latest desi rap releases"
+                    else -> "desi hip hop weekly charts"
+                }
+            } else {
+                when (day) {
+                    1 -> "chill hip hop rap melodic tracks Vevo"
+                    2 -> "latest billboard rap hiphop Lyrical Lemonade"
+                    3 -> "uk drill hip hop rap tracks official video"
+                    4 -> "trap beat hip hop rap hits Vevo"
+                    5 -> "90s boom bap hip hop classics"
+                    6 -> "new hiphop releases official audio"
+                    else -> "hip hop top charts weekly Vevo"
+                }
+            }
+            "pop" -> if (isIndia) {
+                when (day) {
+                    1 -> "hindi indie pop hits Sony Music"
+                    2 -> "latest indian pop releases Zee Music"
+                    3 -> "punjabi pop songs charts"
+                    4 -> "hindi romantic pop acoustic T-Series"
+                    5 -> "desi pop singles audio"
+                    6 -> "latest indie pop releases india"
+                    else -> "indian pop top weekly charts"
+                }
+            } else {
+                when (day) {
+                    1 -> "acoustic pop cover official audio Vevo"
+                    2 -> "top billboard pop hits official video Vevo"
+                    3 -> "indie pop alt pop tracks"
+                    4 -> "dance pop hits mainstream radio Vevo"
+                    5 -> "pop anthems global charts Vevo"
+                    6 -> "new pop release official audio"
+                    else -> "pop weekly hits countdown Vevo"
+                }
+            }
+            "rock" -> when (day) {
+                1 -> "acoustic rock indie folk tracks Vevo"
+                2 -> "indie rock alternative official video Vevo"
+                3 -> "classic rock hits legacy audio"
+                4 -> "indie pop rock bedroom pop"
+                5 -> "grunge alternative rock classics Vevo"
+                6 -> "new indie rock releases"
+                else -> "rock top weekly charts Vevo"
+            }
+            "rb" -> when (day) {
+                1 -> "neo soul r&b chill tracks Vevo"
+                2 -> "latest r&b soul music official video Vevo"
+                3 -> "r&b slow jam love tracks official audio"
+                4 -> "indie r&b soul fresh releases"
+                5 -> "90s classic r&b hits Vevo"
+                6 -> "new r&b releases official audio"
+                else -> "r&b soul top charts Vevo"
+            }
+            else -> ""
+        }
+    }
+
+    private suspend fun fetchGenreTracksFromApple(isIndia: Boolean, genreId: Int, sectionLabel: String): List<Track> {
+        return try {
+            val appleEntries = ITunesHelper.getTopSongsForGenre(isIndia, genreId, limit = 12)
+            if (appleEntries.isEmpty()) return emptyList()
+            
+            val uniqueEntries = appleEntries.distinctBy { "${it.title.lowercase()}_${it.artist.lowercase()}" }
+            
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val deferredList = uniqueEntries.map { entry ->
+                    async {
+                        try {
+                            val query = "${entry.title} ${entry.artist} official audio"
+                            val ytResults = YouTubeSearchHelper.search(query)
+                            if (ytResults.isNotEmpty()) {
+                                val best = ytResults[0]
+                                Track(
+                                    id = best.videoId,
+                                    title = entry.title,
+                                    artist = entry.artist,
+                                    thumbnailUrl = entry.thumbnailUrl, // High-res Apple Music artwork!
+                                    duration = best.duration,
+                                    album = ""
+                                )
+                            } else {
+                                null
+                            }
+                        } catch (e: Exception) {
+                            Log.e("GenreFetch", "Failed to resolve video for ${entry.title}", e)
+                            null
+                        }
+                    }
+                }
+                val resolved = deferredList.awaitAll().filterNotNull()
+                resolved.distinctBy { it.id }
+            }
+        } catch (e: Exception) {
+            Log.e("GenreFetch", "Failed to load Apple Genre RSS feed for $genreId", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun fetchSectionDataDirectly(section: String, isIndia: Boolean): List<Track> {
+        return when (section) {
+            "trending" -> {
+                ITunesHelper.getTopSongs(isIndia).take(10).map {
+                    Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "")
+                }
+            }
+            "albums" -> {
+                ITunesHelper.getTopAlbums(isIndia).take(10).map {
+                    Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "")
+                }
+            }
+            "releases" -> {
+                ITunesHelper.getNewReleases(isIndia).take(10).map {
+                    Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "")
+                }
+            }
+            "global_local" -> {
+                ITunesHelper.getTopSongs(!isIndia).take(10).map {
+                    Track(id = it.id, title = it.title, artist = it.artist, thumbnailUrl = it.thumbnailUrl, duration = "3:00", album = "")
+                }
+            }
+            "top10" -> {
+                val query = if (isIndia) "top 10 trending hit songs india official music video" else "top 10 trending hit songs global official music video"
+                YouTubeSearchHelper.search(query).take(10).map { it.toTrack("YouTube Music Top 10") }
+            }
+            "bollywood" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = true, genreId = 1263, sectionLabel = "Bollywood Hits")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("bollywood", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Bollywood Hits") }
+                }
+            }
+            "mood" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 20, sectionLabel = "Mood & Chill")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("mood", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Mood & Chill") }
+                }
+            }
+            "party" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 17, sectionLabel = "Party & Dance")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("party", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Party & Dance") }
+                }
+            }
+            "hiphop" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 18, sectionLabel = "Hip-Hop & Rap")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("hiphop", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Hip-Hop & Rap") }
+                }
+            }
+            "pop" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 14, sectionLabel = "Pop Anthems")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("pop", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Pop Anthems") }
+                }
+            }
+            "rock" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 21, sectionLabel = "Rock & Indie")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("rock", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("Rock & Indie") }
+                }
+            }
+            "rb" -> {
+                val appleTracks = fetchGenreTracksFromApple(isIndia = isIndia, genreId = 15, sectionLabel = "R&B & Soul")
+                if (appleTracks.size >= 3) {
+                    appleTracks.take(10)
+                } else {
+                    val query = getDailyQueryForSection("rb", isIndia)
+                    YouTubeSearchHelper.search(query).take(10).map { it.toTrack("R&B & Soul") }
+                }
+            }
+            else -> emptyList()
+        }
+    }
+
+    fun loadSection(section: String) {
+        val region = _exploreRegion.value
+        val isIndia = region == ExploreRegion.INDIA
+        val cacheKey = "${section}_${region.name}"
+        
+        if (loadingSections.contains(cacheKey)) {
+            Log.d("ExploreLogger", "[ABORT] Section '$section' for region '${region.name}' is already loading. Skipping duplicate request.")
+            return
+        }
+        
+        viewModelScope.launch {
+            loadingSections.add(cacheKey)
+            _activeLoadingSections.value = _activeLoadingSections.value + cacheKey
+            Log.i("ExploreLogger", "[START] Loading section: '$section', Region: '${region.name}', CacheKey: '$cacheKey'")
+            
+            if ((section == "trending" || section == "albums") && _trendingSongs.value.isEmpty()) {
+                _isExploreLoading.value = true
+            }
+            try {
+                val now = System.currentTimeMillis()
+                
+                // 1. Check memory cache first
+                var cached = exploreCache[cacheKey]
+                if (cached != null) {
+                    Log.i("ExploreLogger", "[MEMORY CACHE HIT] Section '$section' found in memory. Tracks count: ${cached.tracks.size}")
+                }
+                
+                // 2. If not in memory, check Room database cache
+                if (cached == null) {
+                    try {
+                        Log.d("ExploreLogger", "[ROOM DB READ START] Attempting to read Room cache for key: '$cacheKey'")
+                        val startTime = System.nanoTime()
+                        val dbCache = songDao.getExploreCache(cacheKey)
+                        val durationMs = (System.nanoTime() - startTime) / 1_000_000.0
+                        
+                        if (dbCache != null) {
+                            val tracks = trackListAdapter.fromJson(dbCache.dataJson)
+                            if (tracks != null) {
+                                cached = ExploreCacheEntry(tracks, dbCache.lastScrapedAt)
+                                exploreCache[cacheKey] = cached
+                                Log.i("ExploreLogger", "[ROOM DB READ SUCCESS] Room cache found. Read duration: ${String.format("%.2f", durationMs)} ms. Tracks count: ${tracks.size}")
+                            } else {
+                                Log.w("ExploreLogger", "[ROOM DB READ WARN] Room cache record was found but failed to deserialize data json.")
+                            }
+                        } else {
+                            Log.i("ExploreLogger", "[ROOM DB READ MISS] No cache record found in Room database for key '$cacheKey' (read took ${String.format("%.2f", durationMs)} ms)")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ExploreLogger", "[ROOM DB READ ERROR] Failed to read database cache for key $cacheKey", e)
+                    }
+                }
+                
+                // 3. Determine if cache is valid based on day boundary for scraped rows, or 2 hours for top rows
+                var isCacheValid = false
+                if (cached != null) {
+                    if (isYouTubeSection(section) && section != "top10") {
+                        // For scraped rows, invalidation happens on day-of-year changes to match daily query rotation
+                        val currentCalendar = java.util.Calendar.getInstance()
+                        val cachedCalendar = java.util.Calendar.getInstance().apply { timeInMillis = cached.timestamp }
+                        isCacheValid = currentCalendar.get(java.util.Calendar.YEAR) == cachedCalendar.get(java.util.Calendar.YEAR) &&
+                                       currentCalendar.get(java.util.Calendar.DAY_OF_YEAR) == cachedCalendar.get(java.util.Calendar.DAY_OF_YEAR)
+                        Log.d("ExploreLogger", "[CACHE EVALUATION] Section '$section' is a scraped genre. isCacheValid=$isCacheValid (Cache day-of-year: ${cachedCalendar.get(java.util.Calendar.DAY_OF_YEAR)}, Today: ${currentCalendar.get(java.util.Calendar.DAY_OF_YEAR)})")
+                    } else {
+                        // For top rows, 2 hours TTL
+                        isCacheValid = (now - cached.timestamp) < 2 * 60 * 60 * 1000L
+                        Log.d("ExploreLogger", "[CACHE EVALUATION] Section '$section' is a top official chart. isCacheValid=$isCacheValid (Cache age: ${(now - cached.timestamp) / 1000} seconds, Limit: 7200 seconds)")
+                    }
+                }
+                
+                // 4. If cache is valid, update UI and exit
+                if (cached != null && isCacheValid) {
+                    Log.i("ExploreLogger", "[CACHE RESTORED] Restoring valid cache for '$section'. Rendering tracks...")
+                    cached.tracks.forEachIndexed { idx, track ->
+                        Log.d("ExploreLogger", "  - Track #$idx: '${track.title}' by '${track.artist}' (VideoID: ${track.id})")
+                    }
+                    updateUiState(section, cached.tracks)
+                    return@launch
+                }
+                
+                // 5. If cache exists but is stale, show it immediately so screen is populated
+                if (cached != null) {
+                    Log.i("ExploreLogger", "[CACHE STALE] Cache exists but is stale. Rendering stale tracks immediately to avoid blank screen while syncing...")
+                    updateUiState(section, cached.tracks)
+                } else {
+                    Log.i("ExploreLogger", "[CACHE MISS] No cache exists for '$section'. Loader shimmer remains active.")
+                }
+                
+                // 6. Fetch fresh data from network with a 10-second timeout constraint
+                Log.i("ExploreLogger", "[NETWORK START] Triggering fetchSectionDataDirectly for '$section' (India=$isIndia)")
+                val freshTracks = kotlinx.coroutines.withTimeoutOrNull(10000L) {
+                    fetchSectionDataDirectly(section, isIndia)
+                }
+                
+                if (freshTracks != null && freshTracks.isNotEmpty()) {
+                    Log.i("ExploreLogger", "[NETWORK SUCCESS] Fetched ${freshTracks.size} fresh tracks for '$section'")
+                    freshTracks.forEachIndexed { idx, track ->
+                        Log.d("ExploreLogger", "  - Fresh Track #$idx: '${track.title}' by '${track.artist}' (VideoID: ${track.id})")
+                    }
+                    
+                    exploreCache[cacheKey] = ExploreCacheEntry(freshTracks, now)
+                    updateUiState(section, freshTracks)
+                    
+                    // 7. Save to Room database cache
+                    try {
+                        Log.d("ExploreLogger", "[ROOM DB WRITE START] Writing fresh cache record to Room for key '$cacheKey'")
+                        val json = trackListAdapter.toJson(freshTracks)
+                        songDao.insertExploreCache(ExploreCache(cacheKey, json, now))
+                        Log.i("ExploreLogger", "[ROOM DB WRITE SUCCESS] Successfully persisted fresh cache record to Room for key '$cacheKey'")
+                    } catch (e: Exception) {
+                        Log.e("ExploreLogger", "[ROOM DB WRITE ERROR] Failed to write database cache for key $cacheKey", e)
+                    }
+                } else {
+                    Log.w("ExploreLogger", "[NETWORK TIMEOUT/EMPTY] Network request returned empty or timed out (10s limit) for '$section'")
+                    // Reset loading status on empty response/timeout to dismiss shimmer if there is no cache
+                    if (cached == null) {
+                        Log.i("ExploreLogger", "[UI REFUND] Clearing shimmer to empty list for '$section' due to network timeout and lack of cached entries.")
+                        updateUiState(section, emptyList())
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ExploreLogger", "[ERROR] Exception caught in loadSection flow for '$section'", e)
+                // Reset loading status on exception to dismiss shimmer if there is no cache
+                if (exploreCache[cacheKey] == null) {
+                    Log.i("ExploreLogger", "[UI REFUND] Clearing shimmer to empty list for '$section' due to exception and lack of cached entries.")
+                    updateUiState(section, emptyList())
+                }
             } finally {
-                _isExploreLoading.value = false
+                loadingSections.remove(cacheKey)
+                _activeLoadingSections.value = _activeLoadingSections.value - cacheKey
+                if (section == "trending" || section == "albums") {
+                    _isExploreLoading.value = false
+                }
+                Log.i("ExploreLogger", "[FINISH] Completed load flow for '$section'. Active loading tasks remaining: ${loadingSections.size}")
             }
         }
     }
@@ -579,7 +1011,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val modern = prefs.getBoolean("is_modern_mode", false)
         _isModernMode.value = modern
 
-        fetchExploreContent()
+        prefetchExplore()
 
         if (savedTrack == null) {
             val lastTrackId = prefs.getString("last_track_id", null)
@@ -705,7 +1137,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
-        fetchExploreContent()
+        // Redundant startup fetch removed to optimize resources
     }
 
     private fun enforceRoomTimeLimit() {

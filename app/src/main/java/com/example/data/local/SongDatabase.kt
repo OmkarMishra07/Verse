@@ -44,6 +44,13 @@ data class RecentlyPlayed(
     val playedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "explore_cache")
+data class ExploreCache(
+    @PrimaryKey val sectionKey: String,
+    val dataJson: String,
+    val lastScrapedAt: Long
+)
+
 @Dao
 interface SongDao {
     // Liked Songs
@@ -130,11 +137,21 @@ interface SongDao {
         clearPlaylistSongs()
         clearRecentlyPlayed()
     }
+
+    // Explore Cache Methods
+    @Query("SELECT * FROM explore_cache WHERE sectionKey = :key")
+    suspend fun getExploreCache(key: String): ExploreCache?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExploreCache(cache: ExploreCache)
+
+    @Query("DELETE FROM explore_cache WHERE sectionKey = :key")
+    suspend fun deleteExploreCache(key: String)
 }
 
 @Database(
-    entities = [LikedSong::class, Playlist::class, PlaylistSong::class, RecentlyPlayed::class],
-    version = 2,
+    entities = [LikedSong::class, Playlist::class, PlaylistSong::class, RecentlyPlayed::class, ExploreCache::class],
+    version = 3,
     exportSchema = false
 )
 abstract class SongDatabase : RoomDatabase() {

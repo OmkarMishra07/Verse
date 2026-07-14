@@ -16,6 +16,25 @@ class VerseApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        scheduleExploreRefresh()
+    }
+
+    private fun scheduleExploreRefresh() {
+        val constraints = androidx.work.Constraints.Builder()
+            .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            .build()
+
+        val exploreRefreshRequest = androidx.work.PeriodicWorkRequestBuilder<com.example.data.remote.ExploreRefreshWorker>(
+            24, java.util.concurrent.TimeUnit.HOURS
+        )
+            .setConstraints(constraints)
+            .build()
+
+        androidx.work.WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "ExploreRefreshWork",
+            androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+            exploreRefreshRequest
+        )
     }
 
     override fun newImageLoader(): ImageLoader {

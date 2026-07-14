@@ -2706,6 +2706,72 @@ fun JammingScreen(
     }
 }
 
+@Composable
+fun ShimmerCardPlaceholder() {
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val translateAnim by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerTranslate"
+    )
+    
+    val shimmerColors = listOf(
+        Color.White.copy(alpha = 0.05f),
+        Color.White.copy(alpha = 0.15f),
+        Color.White.copy(alpha = 0.05f),
+    )
+    
+    val brush = Brush.linearGradient(
+        colors = shimmerColors,
+        start = androidx.compose.ui.geometry.Offset(translateAnim - 200f, translateAnim - 200f),
+        end = androidx.compose.ui.geometry.Offset(translateAnim + 200f, translateAnim + 200f)
+    )
+    
+    Box(
+        modifier = Modifier
+            .size(130.dp, 180.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(brush)
+    )
+}
+
+@Composable
+fun ShimmerRankedCardPlaceholder() {
+    val transition = rememberInfiniteTransition(label = "shimmer_ranked")
+    val translateAnim by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1000f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerTranslateRanked"
+    )
+    
+    val shimmerColors = listOf(
+        Color.White.copy(alpha = 0.05f),
+        Color.White.copy(alpha = 0.15f),
+        Color.White.copy(alpha = 0.05f),
+    )
+    
+    val brush = Brush.linearGradient(
+        colors = shimmerColors,
+        start = androidx.compose.ui.geometry.Offset(translateAnim - 200f, translateAnim - 200f),
+        end = androidx.compose.ui.geometry.Offset(translateAnim + 200f, translateAnim + 200f)
+    )
+    
+    Box(
+        modifier = Modifier
+            .size(150.dp, 110.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(brush)
+    )
+}
+
 // ==========================================
 // 2. EXPLORE PAGE
 // ==========================================
@@ -2726,6 +2792,32 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val rbTracks by viewModel.rbTracks.collectAsState()
     val youtubeTop10 by viewModel.youtubeTop10.collectAsState()
     val isLoading by viewModel.isExploreLoading.collectAsState()
+    val activeLoadingSections by viewModel.activeLoadingSections.collectAsState()
+    
+    @Composable
+    fun ExploreEmptyOrRetryRow(section: String, heightDp: Int = 180) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(heightDp.dp)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("No content available", color = Color.Gray, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = { viewModel.loadSection(section) },
+                    colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
     
     val pageScrollState = rememberScrollState()
     val songsRowState = rememberLazyListState()
@@ -2745,6 +2837,27 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
     val top10Hits = trendingSongs.take(10)
 
     val flatList = top10Hits + trendingSongs + trendingAlbums + newReleases + bollywoodHits + globalOrLocalHits + moodTracks + partyTracks + hipHopTracks + popTracks + rockTracks + rbTracks + youtubeTop10
+
+    LaunchedEffect(exploreRegion) {
+        viewModel.loadSection("trending")
+        viewModel.loadSection("albums")
+        
+        kotlinx.coroutines.delay(200)
+        viewModel.loadSection("releases")
+        viewModel.loadSection("global_local")
+        viewModel.loadSection("top10")
+        
+        kotlinx.coroutines.delay(400)
+        viewModel.loadSection("bollywood")
+        viewModel.loadSection("mood")
+        viewModel.loadSection("party")
+        
+        kotlinx.coroutines.delay(600)
+        viewModel.loadSection("hiphop")
+        viewModel.loadSection("pop")
+        viewModel.loadSection("rock")
+        viewModel.loadSection("rb")
+    }
 
     LaunchedEffect(focusedIndex) {
         if (flatList.isEmpty()) return@LaunchedEffect
@@ -2790,12 +2903,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         }
     }
 
-    if (isLoading && flatList.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(32.dp))
-        }
-        return
-    }
+    // Full-screen loader removed to allow progressive shimmer loading
 
     Column(
         modifier = Modifier
@@ -2847,76 +2955,120 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             }
         }
 
-        if (top10Hits.isNotEmpty()) {
+        // ─── Top 10 Hits ───
+        val top10Key = "top10_${exploreRegion.name}"
+        val isTop10Loading = activeLoadingSections.contains(top10Key)
+        if (top10Hits.isNotEmpty() || isTop10Loading) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Top 10 Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top 10 Hits", top10Hits) })
+                if (top10Hits.isNotEmpty()) {
+                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top 10 Hits", top10Hits) })
+                }
             }
             LazyRow(
                 state = top10RowState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                itemsIndexed(top10Hits) { index, track ->
-                    val isFocused = index == focusedIndex
-                    RankedSpotifyCard(track = track, rank = index + 1, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                if (top10Hits.isEmpty()) {
+                    items(5) {
+                        ShimmerRankedCardPlaceholder()
+                    }
+                } else {
+                    itemsIndexed(top10Hits) { index, track ->
+                        val isFocused = index == focusedIndex
+                        RankedSpotifyCard(track = track, rank = index + 1, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
         }
 
-        if (trendingSongs.isNotEmpty()) {
+        // ─── Top Trending Songs ───
+        val trendingKey = "trending_${exploreRegion.name}"
+        val isTrendingLoading = activeLoadingSections.contains(trendingKey)
+        if (trendingSongs.isNotEmpty() || isTrendingLoading) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Top Trending Songs", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top Trending Songs", trendingSongs) })
+                if (trendingSongs.isNotEmpty()) {
+                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top Trending Songs", trendingSongs) })
+                }
             }
-            val offset = top10Hits.size
+            val offsetTrending = top10Hits.size
             LazyRow(
                 state = songsRowState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                itemsIndexed(trendingSongs.take(15)) { index, track ->
-                    val isFocused = (index + offset) == focusedIndex
-                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                if (trendingSongs.isEmpty()) {
+                    items(5) {
+                        ShimmerCardPlaceholder()
+                    }
+                } else {
+                    itemsIndexed(trendingSongs.take(15)) { index, track ->
+                        val isFocused = (index + offsetTrending) == focusedIndex
+                        SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
         }
         
-        if (trendingAlbums.isNotEmpty()) {
+        // ─── Trending Albums ───
+        val albumsKey = "albums_${exploreRegion.name}"
+        val isAlbumsLoading = activeLoadingSections.contains(albumsKey)
+        if (trendingAlbums.isNotEmpty() || isAlbumsLoading) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Trending Albums", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Trending Albums", trendingAlbums) })
+                if (trendingAlbums.isNotEmpty()) {
+                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Trending Albums", trendingAlbums) })
+                }
             }
-            val offset = top10Hits.size + trendingSongs.size
+            val offsetAlbums = top10Hits.size + trendingSongs.size
             LazyRow(
                 state = albumsRowState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                itemsIndexed(trendingAlbums.take(15)) { index, track ->
-                    val isFocused = (index + offset) == focusedIndex
-                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                if (trendingAlbums.isEmpty()) {
+                    items(5) {
+                        ShimmerCardPlaceholder()
+                    }
+                } else {
+                    itemsIndexed(trendingAlbums.take(15)) { index, track ->
+                        val isFocused = (index + offsetAlbums) == focusedIndex
+                        SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
         }
 
-        if (newReleases.isNotEmpty()) {
+        // ─── New Releases ───
+        val releasesKey = "releases_${exploreRegion.name}"
+        val isReleasesLoading = activeLoadingSections.contains(releasesKey)
+        if (newReleases.isNotEmpty() || isReleasesLoading) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("New Releases", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("New Releases", newReleases) })
+                if (newReleases.isNotEmpty()) {
+                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("New Releases", newReleases) })
+                }
             }
-            val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size
+            val offsetReleases = top10Hits.size + trendingSongs.size + trendingAlbums.size
             LazyRow(
                 state = releasesRowState,
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                itemsIndexed(newReleases.take(15)) { index, track ->
-                    val isFocused = (index + offset) == focusedIndex
-                    SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                if (newReleases.isEmpty()) {
+                    items(5) {
+                        ShimmerCardPlaceholder()
+                    }
+                } else {
+                    itemsIndexed(newReleases.take(15)) { index, track ->
+                        val isFocused = (index + offsetReleases) == focusedIndex
+                        SpotifyCard(track = track, isFocused = isFocused) { viewModel.selectAndPlayTrack(track, flatList) }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(28.dp))
