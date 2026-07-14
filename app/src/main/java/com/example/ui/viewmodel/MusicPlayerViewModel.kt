@@ -468,6 +468,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private var lastSeekTime = 0L
     private var lastTrackChangeTime = 0L
     private var lastSeekTargetMs = -1L
+    private var seekPushJob: kotlinx.coroutines.Job? = null
 
     fun seekTo(positionMs: Long, fromUser: Boolean = false) {
         _currentPositionMs.value = positionMs
@@ -477,8 +478,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         lastSeekTargetMs = positionMs
 
         if (fromUser) {
-            pushJammingState()
             lastLocalActionTime = com.example.data.remote.JammingService.getTrueTime()
+            seekPushJob?.cancel()
+            seekPushJob = viewModelScope.launch {
+                kotlinx.coroutines.delay(300)
+                pushJammingState()
+            }
         }
     }
 
