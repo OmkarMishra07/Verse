@@ -150,6 +150,9 @@ dependencies {
   // Media3 for foreground MediaSessionService, notification, BT/headset/lock-screen
   implementation("androidx.media3:media3-session:1.4.1")
   implementation("androidx.media3:media3-common:1.4.1")
+  // Media3 ExoPlayer for direct audio stream playback (replaces WebView)
+  implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.ui)
   
   // WorkManager for robust background room cleanup sweeps
   implementation(libs.androidx.work.runtime)

@@ -2,7 +2,6 @@ package com.example
 
 import android.app.Application
 import android.os.Bundle
-import android.webkit.WebView
 import android.widget.Toast
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
@@ -79,7 +78,6 @@ import com.example.data.model.Track
 import com.example.data.model.toTrack
 import com.example.ui.components.ClickWheel
 import com.example.ui.components.MiniYouTubePlayerBar
-import com.example.ui.components.YouTubeWebViewPlayer
 import com.example.ui.components.AuthScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.google.firebase.auth.FirebaseAuth
@@ -182,8 +180,6 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             } else {
-                                val context = androidx.compose.ui.platform.LocalContext.current
-                                com.example.WebViewHolder.init(context, musicViewModel)
                                 iPodPlayerApp(
                                     currentUser = currentUser,
                                     onLogout = {
@@ -994,13 +990,6 @@ fun iPodScreenDisplay(
 
         Column(modifier = Modifier.fillMaxSize()) {
             iPodStatusBar(viewModel, currentTrack, currentUser, onLogout, customNickname)
-
-            Box(modifier = Modifier.size(1.dp).alpha(0f)) {
-                YouTubeWebViewPlayer(
-                    viewModel = viewModel,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
 
             Box(
                 modifier = Modifier

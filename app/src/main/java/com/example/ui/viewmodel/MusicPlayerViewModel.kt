@@ -20,6 +20,7 @@ import com.example.data.queue.SkipTracker
 import com.example.data.queue.PrefetchManager
 import com.example.data.queue.QueuePersistence
 import com.example.data.queue.PlaybackSession
+import com.example.playback.ExoPlayerPlaybackEngine
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -290,7 +291,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         if (_isPlaying.value != state.playing) {
             _isPlaying.value = state.playing
-            if (state.playing) com.example.WebViewHolder.play() else com.example.WebViewHolder.pause()
+            if (state.playing) ExoPlayerPlaybackEngine.play() else ExoPlayerPlaybackEngine.pause()
         }
 
         val current = _currentTrack.value
@@ -299,7 +300,13 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val track = Track(id = state.currentTrackId, title = state.currentTrackTitle, artist = state.currentTrackArtist, thumbnailUrl = state.currentTrackThumbnail, duration = state.currentTrackDuration, album = "")
             _currentTrack.value = track
             _playTrigger.value += 1
-            com.example.WebViewHolder.loadVideo(track.id, 0, state.playing)
+            viewModelScope.launch {
+                try {
+                    ExoPlayerPlaybackEngine.loadAndPlay(track, 0L)
+                } catch (e: Exception) {
+                    Log.e("MusicPlayerViewModel", "Failed to load remote track: ${e.message}")
+                }
+            }
             trackChanged = true
             lastTrackChangeTime = com.example.data.remote.JammingService.getTrueTime()
             android.util.Log.d("JamSync", "Track changed to: ${state.currentTrackTitle}")
@@ -312,7 +319,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             android.util.Log.d("JamSync", "Seeking to ${expectedMs}ms (elapsed=${elapsed}ms, diff=${Math.abs(_currentPositionMs.value - expectedMs)}ms)")
             _currentPositionMs.value = expectedMs
             _seekRequestMs.value = expectedMs
-            com.example.WebViewHolder.seekTo(expectedMs / 1000f)
+            ExoPlayerPlaybackEngine.seekTo(expectedMs)
         }
     }
 
@@ -874,7 +881,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun seekTo(positionMs: Long, fromUser: Boolean = false) {
         _currentPositionMs.value = positionMs
         _seekRequestMs.value = positionMs
-        com.example.WebViewHolder.seekTo(positionMs / 1000f)
+        ExoPlayerPlaybackEngine.seekTo(positionMs)
         lastSeekTime = com.example.data.remote.JammingService.getTrueTime()
         lastSeekTargetMs = positionMs
 
@@ -1027,10 +1034,32 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     init {
         instance = this
-        
+
         // Clean up any potential duplicates in the local database immediately on startup
         viewModelScope.launch {
             songDao.removeDuplicatePlaylistSongs()
+        }
+
+        // ── ExoPlayer position/duration/buffer updater ────────────────────────
+        // Polls ExoPlayer every 500ms for position updates (replaces JS bridge onTimeUpdate).
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                val engine = ExoPlayerPlaybackEngine
+                if (engine.isReady() && _currentTrack.value != null) {
+                    val pos = engine.currentPositionMs()
+                    val dur = engine.durationMs()
+                    val buf = engine.bufferedFraction()
+                    if (pos > 0) updateProgress(pos)
+                    if (dur > 0) updateDuration(dur)
+                    updateBufferedFraction(buf)
+                    // Sync playing state from ExoPlayer (handles audio focus, noisy, etc.)
+                    val enginePlaying = engine.isPlaying()
+                    if (_isPlaying.value != enginePlaying) {
+                        _isPlaying.value = enginePlaying
+                    }
+                }
+            }
         }
 
         val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", android.content.Context.MODE_PRIVATE)
@@ -1420,7 +1449,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _isPlaying.value = true
             lastTrackChangeTime = com.example.data.remote.JammingService.getTrueTime()
             _playTrigger.value += 1
-            com.example.WebViewHolder.loadVideo(resolved.id, 0, true)
+            ExoPlayerPlaybackEngine.loadAndPlay(resolved, 0L)
             FirebaseCrashlytics.getInstance().setCustomKey("playback_state", "playing")
             pushJammingState(includeTrackMetadata = true)
             
@@ -1550,7 +1579,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             val roomState = _jammingRoomState.value
             if (roomId.isNotBlank() && roomState?.playing == true) {
                 Log.d("MusicPlayerViewModel", "Ignoring setPlaying(false) because room state requires playing")
-                com.example.WebViewHolder.play()
+                ExoPlayerPlaybackEngine.play()
                 return
             }
         }
