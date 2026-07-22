@@ -378,10 +378,13 @@ fun LoginSlide(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable {
-                            if (email.isBlank()) {
+                            val trimmedEmail = email.trim()
+                            if (trimmedEmail.isBlank()) {
                                 Toast.makeText(context, "Please enter your email address to reset password.", Toast.LENGTH_SHORT).show()
+                            } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+                                Toast.makeText(context, "Please enter a valid email address.", Toast.LENGTH_SHORT).show()
                             } else {
-                                FirebaseAuth.getInstance().sendPasswordResetEmail(email)
+                                FirebaseAuth.getInstance().sendPasswordResetEmail(trimmedEmail)
                                     .addOnCompleteListener { task ->
                                         if (task.isSuccessful) {
                                             Toast.makeText(context, "Password reset email sent!", Toast.LENGTH_SHORT).show()
@@ -434,8 +437,13 @@ fun LoginSlide(
                         Toast.makeText(context, "Please fill in all fields", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
+                    val trimmedEmail = email.trim()
+                    if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+                        Toast.makeText(context, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
                     loading = true
-                    FirebaseAuth.getInstance().signInWithEmailAndPassword(email, password)
+                    FirebaseAuth.getInstance().signInWithEmailAndPassword(trimmedEmail, password)
                         .addOnCompleteListener { task ->
                             loading = false
                             if (task.isSuccessful) {
@@ -714,19 +722,33 @@ fun SignUpSlide(
                         Toast.makeText(context, "Please fill in all fields", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
+                    val trimmedEmail = email.trim()
+                    val trimmedUsername = username.trim()
+                    if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()) {
+                        Toast.makeText(context, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    if (trimmedUsername.length < 3) {
+                        Toast.makeText(context, "Username must be at least 3 characters", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    if (password.length < 8) {
+                        Toast.makeText(context, "Password must be at least 8 characters", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
                     if (password != confirmPassword) {
                         Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
                     loading = true
-                    FirebaseAuth.getInstance().createUserWithEmailAndPassword(email, password)
+                    FirebaseAuth.getInstance().createUserWithEmailAndPassword(trimmedEmail, password)
                         .addOnCompleteListener { task ->
                             loading = false
                             if (task.isSuccessful) {
                                 val user = task.result?.user
                                 if (user != null) {
                                     val profileUpdates = userProfileChangeRequest {
-                                        displayName = username
+                                        displayName = trimmedUsername
                                     }
                                     user.updateProfile(profileUpdates).addOnCompleteListener {
                                         user.sendEmailVerification().addOnCompleteListener { verifyTask ->
@@ -893,7 +915,7 @@ private fun performGoogleLogin(
 ) {
     val credentialManager = CredentialManager.create(context)
     val googleIdOption = GetGoogleIdOption.Builder()
-        .setServerClientId("529493812638-lj2peeid05r7b7gua8s7i7sqt3bl6rvh.apps.googleusercontent.com")
+        .setServerClientId(com.example.BuildConfig.GOOGLE_CLIENT_ID)
         .setFilterByAuthorizedAccounts(false)
         .build()
 

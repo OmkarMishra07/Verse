@@ -3,9 +3,6 @@ package com.example.ui.viewmodel
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.AudioFocusRequest
-import android.media.AudioManager
 import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -15,6 +12,14 @@ import com.example.data.local.*
 import com.example.data.model.*
 import com.example.data.network.ITunesHelper
 import com.example.data.network.YouTubeSearchHelper
+import com.example.data.queue.QueueManager
+import com.example.data.queue.QueueSource
+import com.example.data.queue.RecommendationEngine
+import com.example.data.queue.RecommendationCache
+import com.example.data.queue.SkipTracker
+import com.example.data.queue.PrefetchManager
+import com.example.data.queue.QueuePersistence
+import com.example.data.queue.PlaybackSession
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -73,52 +78,6 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     // ── Rapid-tap guard: ensures only the newest play request executes ──────────
     private var playResolveJob: kotlinx.coroutines.Job? = null
 
-    // ── Audio focus management ─────────────────────────────────────────────────
-    private val audioManager by lazy {
-        getApplication<Application>().getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    private var audioFocusRequest: AudioFocusRequest? = null
-    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
-        // No-op: Chromium WebView natively requests and manages audio focus. 
-        // When WebView loses focus (e.g. phone call), it pauses the video automatically,
-        // which triggers onPlayerStateChange(2) in PlayerBridge to update this ViewModel.
-        // Doing it manually here creates a race condition where Android strips focus from us
-        // when Chromium requests it, causing us to pause Chromium right as it starts!
-    }
-
-    private fun requestAudioFocus(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
-                .setOnAudioFocusChangeListener(audioFocusChangeListener)
-                .setAcceptsDelayedFocusGain(true)
-                .build()
-            audioFocusRequest = req
-            audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.requestAudioFocus(
-                audioFocusChangeListener,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN
-            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        }
-    }
-
-    private fun abandonAudioFocus() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.abandonAudioFocus(audioFocusChangeListener)
-        }
-    }
-
     // Screen State
     private val _isExpanded = MutableStateFlow(true)
     val isExpanded = _isExpanded.asStateFlow()
@@ -128,6 +87,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setModernMode(modern: Boolean) {
         _isModernMode.value = modern
         getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE).edit().putBoolean("is_modern_mode", modern).apply()
+        currentUserId?.let { uid ->
+            viewModelScope.launch {
+                try {
+                    com.example.data.remote.FirestoreService.saveUserPreferences(uid, modern, _hasSeenWheelTutorial.value)
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicPlayerViewModel", "Error saving user preference: ${e.message}")
+                }
+            }
+        }
         if (!modern && !_hasSeenWheelTutorial.value && _hasChosenVibe.value) {
             setTutorialState(1)
         }
@@ -147,6 +115,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("has_seen_wheel_tutorial", seen).apply()
         prefs.edit().putBoolean("tutorial_completed_v4", seen).apply()
+        currentUserId?.let { uid ->
+            viewModelScope.launch {
+                try {
+                    com.example.data.remote.FirestoreService.saveUserPreferences(uid, _isModernMode.value, seen)
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicPlayerViewModel", "Error saving user preference: ${e.message}")
+                }
+            }
+        }
     }
 
     private val _currentScreen = MutableStateFlow(ScreenType.EXPLORE)
@@ -165,7 +142,19 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _isChatOpen = MutableStateFlow(false)
     val isChatOpen = _isChatOpen.asStateFlow()
-    fun setIsChatOpen(open: Boolean) { _isChatOpen.value = open }
+    fun setIsChatOpen(open: Boolean) {
+        _isChatOpen.value = open
+        // Clear typing indicator immediately when closing chat (before exit animation)
+        if (!open) {
+            val roomId = _jammingRoomId.value
+            if (roomId.isNotBlank()) {
+                val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName
+                if (!me.isNullOrBlank()) {
+                    com.example.data.remote.JammingService.setTypingStatus(roomId, me, false)
+                }
+            }
+        }
+    }
 
     private val _hasUnreadMessages = MutableStateFlow(false)
     val hasUnreadMessages = _hasUnreadMessages.asStateFlow()
@@ -347,7 +336,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         com.squareup.moshi.Types.newParameterizedType(List::class.java, Track::class.java)
     )
 
-    private val exploreCache = mutableMapOf<String, ExploreCacheEntry>()
+    private val exploreCache = java.util.Collections.synchronizedMap(mutableMapOf<String, ExploreCacheEntry>())
     private val loadingSections = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     fun prefetchExplore() {
@@ -866,35 +855,15 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             RepeatMode.ONE -> RepeatMode.OFF
             RepeatMode.OFF -> RepeatMode.ALL
         }
+        queueManager.setRepeat(_repeatMode.value.name, "repeat_control")
+        syncQueuePresentation()
     }
 
     fun toggleShuffle() {
-        val currentTrackObj = _currentTrack.value ?: return
-        val currentList = _queue.value
-        if (currentList.isEmpty()) return
-
-        if (_isShuffleEnabled.value) {
-            // Turn off shuffle -> restore original queue
-            if (originalQueue.isNotEmpty()) {
-                val idx = originalQueue.indexOfFirst { it.id == currentTrackObj.id }
-                _queue.value = originalQueue
-                if (idx != -1) {
-                    _currentQueueIndex.value = idx
-                }
-            }
-            _isShuffleEnabled.value = false
-        } else {
-            // Turn on shuffle -> store current as original, and shuffle
-            originalQueue = currentList.toList()
-            val shuffled = currentList.toMutableList().apply {
-                remove(currentTrackObj)
-                shuffle()
-                add(0, currentTrackObj)
-            }
-            _queue.value = shuffled
-            _currentQueueIndex.value = 0
-            _isShuffleEnabled.value = true
-        }
+        if (_currentTrack.value == null) return
+        queueManager.toggleShuffle("shuffle_control")
+        _isShuffleEnabled.value = queueManager.state.value.shuffle
+        syncQueuePresentation()
     }
 
     private var lastSeekTime = 0L
@@ -934,10 +903,75 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private val _isShuffleEnabled = MutableStateFlow(false)
     val isShuffleEnabled = _isShuffleEnabled.asStateFlow()
 
-    private var originalQueue: List<Track> = emptyList()
-
     private val _currentQueueIndex = MutableStateFlow(0)
     val currentQueueIndex = _currentQueueIndex.asStateFlow()
+
+    private val manualQueue = mutableListOf<Track>()
+    private val contextQueue = mutableListOf<Track>()
+    private val historyQueue = mutableListOf<Track>()
+    private val autoplayQueue = mutableListOf<Track>()
+
+    /** Authoritative deterministic queue state. Legacy lists below are UI compatibility mirrors only. */
+    private val queueManager = QueueManager()
+    val queueState = queueManager.state
+    val queueDebugLogs = queueManager.logs
+
+    // ── New queue infrastructure ──────────────────────────────────────
+    private val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE)
+    private val recommendationCache = QueuePersistence(prefs).restoreRecommendationCache()
+    private val skipTracker = SkipTracker(prefs)
+    private val recommendationEngine = RecommendationEngine(
+        cache = recommendationCache,
+        skipTracker = skipTracker
+    )
+    private val queuePersistence = QueuePersistence(prefs)
+    private val prefetchManager = PrefetchManager(viewModelScope)
+
+    init {
+        com.example.data.network.YouTubeSearchHelper.init(prefs)
+    }
+
+    private fun rebuildUnifiedQueue() {
+        // Kept for old call sites. New queue transitions use QueueManager directly.
+        syncQueuePresentation()
+    }
+
+    private fun syncQueuePresentation() {
+        val state = queueManager.state.value
+        historyQueue.clear(); historyQueue.addAll(state.history)
+        manualQueue.clear(); manualQueue.addAll(state.manual)
+        contextQueue.clear(); contextQueue.addAll(state.context)
+        autoplayQueue.clear(); autoplayQueue.addAll(state.autoplay)
+        _queue.value = state.visible
+        _currentQueueIndex.value = state.position
+        _isShuffleEnabled.value = state.shuffle
+    }
+
+    /**
+     * Start prefetching streaming data for upcoming tracks.
+     * Called after queue state changes or when a new song starts playing.
+     */
+    private fun startPrefetching() {
+        val state = queueManager.state.value
+        val upcoming = (state.manual + state.context + state.autoplay).take(5)
+        if (upcoming.isNotEmpty()) {
+            prefetchManager.startPrefetching(
+                upcoming = upcoming,
+                resolveTrack = { track ->
+                    // Resolve iTunes tracks to YouTube video IDs
+                    if (track.id.startsWith("itunes_")) {
+                        val query = "${track.title} ${track.artist} audio"
+                        val results = com.example.data.network.YouTubeSearchHelper.search(query)
+                        if (results.isNotEmpty()) {
+                            val yt = results.first()
+                            track.copy(id = yt.videoId, duration = yt.duration)
+                        } else track
+                    } else track
+                },
+                context = getApplication()
+            )
+        }
+    }
 
     // Room Database Flows
     val likedTracks: StateFlow<List<Track>> = songDao.getLikedSongs()
@@ -969,7 +1003,9 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     // Search Flows
     private val _searchQuery = MutableStateFlow("")
     
-    val isHistoryOpen = MutableStateFlow(false)
+    private val _isHistoryOpen = MutableStateFlow(false)
+    val isHistoryOpen = _isHistoryOpen.asStateFlow()
+    fun setHistoryOpen(open: Boolean) { _isHistoryOpen.value = open }
     val searchQuery = _searchQuery.asStateFlow()
 
     private val _searchResults = MutableStateFlow<List<Track>>(emptyList())
@@ -1044,8 +1080,39 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         _isPlaying.value = false // Always start paused on fresh launch
         _currentPositionMs.value = savedPositionMs
         _durationMs.value = savedDurationMs
-        _queue.value = savedQueue ?: emptyList()
-        _currentQueueIndex.value = savedQueueIndex
+        
+        val restoredQueue = savedQueue ?: emptyList()
+        val restoredIndex = savedQueueIndex.coerceIn(0, maxOf(0, restoredQueue.size - 1))
+        
+        historyQueue.clear()
+        contextQueue.clear()
+        manualQueue.clear()
+        autoplayQueue.clear()
+        
+        for (i in 0 until restoredIndex) {
+            if (i in restoredQueue.indices) {
+                historyQueue.add(restoredQueue[i])
+            }
+        }
+        if (restoredIndex in restoredQueue.indices) {
+            _currentTrack.value = restoredQueue[restoredIndex]
+        }
+        for (i in (restoredIndex + 1) until restoredQueue.size) {
+            if (i in restoredQueue.indices) {
+                contextQueue.add(restoredQueue[i])
+            }
+        }
+        // Restore session from QueuePersistence (v2 format, with legacy fallback)
+        val restoredSession = queuePersistence.restoreSession()
+        if (restoredSession != null && restoredSession.current != null) {
+            queueManager.startSession(restoredSession.current!!, restoredSession.upNext, restoredSession.source, "session_restore")
+            queueManager.state.value.current?.let { _currentTrack.value = it }
+            _repeatMode.value = runCatching { RepeatMode.valueOf(queueManager.state.value.repeat) }.getOrDefault(RepeatMode.ALL)
+            _currentPositionMs.value = restoredSession.positionMs
+        } else if (_currentTrack.value != null) {
+            queueManager.startSession(_currentTrack.value!!, contextQueue, QueueSource.UNKNOWN, "legacy_session_migration")
+        }
+        syncQueuePresentation()
 
         // Persist state updates to companion object and SharedPreferences
         viewModelScope.launch {
@@ -1059,7 +1126,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                         .putString("last_track_album", track.album)
                         .putString("last_track_thumb", track.thumbnailUrl)
                         .putString("last_track_duration", track.duration)
-                        .commit()
+                        .apply()
                 }
             }
         }
@@ -1067,10 +1134,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             isPlaying.collect { savedIsPlaying = it }
         }
         viewModelScope.launch {
-            currentPositionMs.collect { pos -> 
-                savedPositionMs = pos 
-                prefs.edit().putLong("last_position_ms", pos).commit()
-            }
+            currentPositionMs
+                .debounce(5000)
+                .collect { pos -> 
+                    savedPositionMs = pos 
+                    prefs.edit().putLong("last_position_ms", pos).apply()
+                }
         }
         viewModelScope.launch {
             durationMs.collect { savedDurationMs = it }
@@ -1078,13 +1147,40 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             queue.collect { q ->
                 savedQueue = q
-                prefs.edit().putString("last_queue_json", serializeTrackList(q)).commit()
+                prefs.edit().putString("last_queue_json", serializeTrackList(q)).apply()
+            }
+        }
+        viewModelScope.launch {
+            queueState.collect { state ->
+                // Save via new QueuePersistence
+                val session = PlaybackSession(
+                    sessionId = state.sessionId,
+                    source = state.source,
+                    current = state.current,
+                    currentBucket = state.currentBucket,
+                    history = state.history,
+                    manual = state.manual,
+                    context = state.context,
+                    autoplay = state.autoplay,
+                    shuffle = state.shuffle,
+                    repeat = state.repeat,
+                    positionMs = _currentPositionMs.value
+                )
+                queuePersistence.saveSession(session)
+
+                // Also save recommendation cache
+                queuePersistence.saveRecommendationCache(recommendationCache)
+
+                // Keep public StateFlows in sync for existing Compose screens and MediaSession callers.
+                _queue.value = state.visible
+                _currentQueueIndex.value = state.position
+                _isShuffleEnabled.value = state.shuffle
             }
         }
         viewModelScope.launch {
             currentQueueIndex.collect { idx -> 
                 savedQueueIndex = idx 
-                prefs.edit().putInt("last_queue_index", idx).commit()
+                prefs.edit().putInt("last_queue_index", idx).apply()
             }
         }
 
@@ -1123,7 +1219,8 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                             }
                         }
                         launch {
-                            val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
+                            val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName?.takeIf { it.isNotBlank() }
+                                ?: "User-${com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid?.takeLast(4) ?: "0000"}"
                             com.example.data.remote.JammingService.listenToTypingStatus(roomId, me).collect { typists ->
                                 _typingUsers.value = typists
                             }
@@ -1314,14 +1411,12 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 track
             }
 
-            // Request audio focus before starting playback
-            // Removed: requestAudioFocus() because WebView handles it natively!
-
             _isLoading.value = false
             _currentPositionMs.value = 0L
             lastSeekTargetMs = 0L // Lock time updates until new video starts
             lastSeekTime = com.example.data.remote.JammingService.getTrueTime()
             _currentTrack.value = resolved
+            rebuildUnifiedQueue()
             _isPlaying.value = true
             lastTrackChangeTime = com.example.data.remote.JammingService.getTrueTime()
             _playTrigger.value += 1
@@ -1375,108 +1470,68 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private suspend fun generateRelatedTracks(track: Track): List<Track> {
-        val existingIds = _queue.value.map { it.id }.toSet()
-        val list = mutableListOf<Track>()
-
-        // Strategy: use multiple query approaches like YouTube does for radio/mix
-        val queries = listOf(
-            "${track.artist} best songs",          // More songs from same artist
-            "${track.title} ${track.artist}",       // Exact match variants
-            "${track.artist} top hits"              // Top hits from artist
-        )
-
-        for (query in queries) {
-            if (list.size >= 10) break
-            try {
-                val results = YouTubeSearchHelper.search(query)
-                results.forEach { yt ->
-                    if (yt.videoId != track.id && yt.videoId !in existingIds && list.none { it.id == yt.videoId }) {
-                        list.add(
-                            Track(
-                                id = yt.videoId,
-                                title = yt.title,
-                                artist = yt.artist,
-                                album = "YouTube Radio",
-                                thumbnailUrl = yt.thumbnailUrl,
-                                duration = yt.duration
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("MusicPlayerViewModel", "Error generating related tracks: ${e.message}", e)
-                FirebaseCrashlytics.getInstance().log("generateRelatedTracks failed query='${query.take(50)}'")
-                FirebaseCrashlytics.getInstance().recordException(e)
-            }
-        }
-        return list
-    }
-
     // Playback controls
     fun selectAndPlayTrack(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
-            // Check if this is a single song selection (e.g. from Search or history)
-            val isSingleSong = newQueue.size <= 1 || !newQueue.any { it.id == track.id }
-
-            if (isSingleSong) {
-                // Start playing the track immediately with a single-item queue
-                _queue.value = listOf(track)
-                _currentQueueIndex.value = 0
-                setScreen(ScreenType.NOW_PLAYING)
-                playResolvedTrack(track)
-
-                // Fetch related tracks in background and append to queue (non-blocking)
-                launch {
-                    val related = generateRelatedTracks(track)
-                    // Append to queue after current track
-                    val currentQueue = _queue.value.toMutableList()
-                    related.forEach { r ->
-                        if (currentQueue.none { it.id == r.id }) currentQueue.add(r)
-                    }
-                    _queue.value = currentQueue
-                }
-            } else {
-                val idx = newQueue.indexOfFirst { it.id == track.id }
-                if (idx != -1) {
-                    _queue.value = newQueue
-                    _currentQueueIndex.value = idx
-                } else {
-                    val updated = listOf(track) + newQueue.filter { it.id != track.id }
-                    _queue.value = updated
-                    _currentQueueIndex.value = 0
-                }
-                playResolvedTrack(track)
-            }
+            setScreen(ScreenType.NOW_PLAYING)
+            playFromIntent(track, newQueue, "ui_play")
         }
     }
 
     fun selectAndPlayTrackNoRedirect(track: Track, newQueue: List<Track> = queue.value) {
         viewModelScope.launch {
-            val isSingleSong = newQueue.size <= 1 || !newQueue.any { it.id == track.id }
-            if (isSingleSong) {
-                _queue.value = listOf(track)
-                _currentQueueIndex.value = 0
-                playResolvedTrack(track)
-                launch {
-                    val related = generateRelatedTracks(track)
-                    val currentQueue = _queue.value.toMutableList()
-                    related.forEach { r ->
-                        if (currentQueue.none { it.id == r.id }) currentQueue.add(r)
-                    }
-                    _queue.value = currentQueue
+            playFromIntent(track, newQueue, "ui_play_no_redirect")
+        }
+    }
+
+    private suspend fun playFromIntent(track: Track, suppliedQueue: List<Track>, trigger: String) {
+        if (queueManager.state.value.visible.any { it.id == track.id } && suppliedQueue == queue.value) {
+            queueManager.selectExisting(track.id, trigger)?.let { playResolvedTrack(it) }
+            syncQueuePresentation()
+            return
+        }
+        val source = when (_currentScreen.value) {
+            ScreenType.SEARCH -> QueueSource.SEARCH
+            ScreenType.PLAYLIST_DETAIL, ScreenType.PLAYLISTS -> QueueSource.PLAYLIST
+            ScreenType.LIKED -> QueueSource.LIKED_SONGS
+            ScreenType.JAMMING -> QueueSource.JAM_SESSION
+            else -> QueueSource.UNKNOWN
+        }
+
+        // Start playing immediately
+        queueManager.startSession(track, emptyList(), source, trigger)
+        syncQueuePresentation()
+        playResolvedTrack(track)
+
+        // Build a dynamic queue: context songs + history + new recommendations
+        viewModelScope.launch {
+            try {
+                val contextSongs = when (source) {
+                    QueueSource.SEARCH -> emptyList()
+                    else -> suppliedQueue.dropWhile { it.id != track.id }.drop(1).take(20)
                 }
-            } else {
-                val idx = newQueue.indexOfFirst { it.id == track.id }
-                if (idx != -1) {
-                    _queue.value = newQueue
-                    _currentQueueIndex.value = idx
-                } else {
-                    val updated = listOf(track) + newQueue.filter { it.id != track.id }
-                    _queue.value = updated
-                    _currentQueueIndex.value = 0
+
+                val recentHistory = fullHistory.value
+                    .filter { it.id != track.id && contextSongs.none { c -> c.id == it.id } }
+                    .takeLast(10)
+
+                val excludeIds = mutableSetOf(track.id) + contextSongs.map { it.id } + recentHistory.map { it.id }
+                val newRecommendations = recommendationEngine.getRecommendations(
+                    seedTrack = track,
+                    count = 20,
+                    excludeIds = excludeIds
+                ).take(15)
+
+                val fullQueue = contextSongs + recentHistory + newRecommendations
+                if (fullQueue.isNotEmpty()) {
+                    queueManager.startSession(track, fullQueue, source, "dynamic_queue_25")
+                    syncQueuePresentation()
                 }
-                playResolvedTrack(track)
+
+                // Start prefetching for upcoming tracks
+                startPrefetching()
+            } catch (e: Exception) {
+                Log.w("MusicPlayerViewModel", "Auto-queue generation failed: ${e.message}")
             }
         }
     }
@@ -1567,11 +1622,6 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun playNext(isAutoPlay: Boolean = false) {
-        val q = _queue.value
-        if (q.isEmpty()) return
-        
-        // If in Jam Session and NOT the host, IGNORE AutoPlay (song ending).
-        // Let the host pick the next song and push it over RTDB.
         val roomId = _jammingRoomId.value
         val me = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.displayName ?: ""
         val isHost = _jammingRoomState.value?.hostName == me
@@ -1580,7 +1630,14 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        FirebaseCrashlytics.getInstance().log("playNext: isAutoPlay=$isAutoPlay repeatMode=${_repeatMode.value} queueSize=${q.size} idx=${_currentQueueIndex.value}")
+        // Record skip for the current track if auto-advancing (user didn't manually skip)
+        if (isAutoPlay) {
+            val currentTrack = _currentTrack.value
+            val currentPosition = _currentPositionMs.value
+            if (currentTrack != null) {
+                skipTracker.recordSkip(currentTrack.id, currentTrack.artist, currentPosition)
+            }
+        }
 
         if (isAutoPlay && _repeatMode.value == RepeatMode.ONE) {
             _currentPositionMs.value = 0L
@@ -1589,66 +1646,68 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
-        val nextIdx = _currentQueueIndex.value + 1
-        if (nextIdx >= q.size) {
-            if (_repeatMode.value == RepeatMode.OFF) {
-                // Fetch related songs and append them dynamically!
-                viewModelScope.launch {
-                    _isLoading.value = true
-                    val lastTrack = q.lastOrNull() ?: currentTrack.value
-                    if (lastTrack != null) {
-                        val related = generateRelatedTracks(lastTrack).filter { track ->
-                            !q.any { it.id == track.id }
+        val nextSong = queueManager.playNext(if (isAutoPlay) "track_ended" else "next_control")
+        if (nextSong != null) {
+            syncQueuePresentation()
+            playResolvedTrack(nextSong)
+            // Proactively refill if upcoming tracks are running low
+            if (isAutoPlay) {
+                val state = queueManager.state.value
+                val upcomingCount = state.manual.size + state.context.size + state.autoplay.size
+                if (upcomingCount < 5) {
+                    viewModelScope.launch {
+                        val current = _currentTrack.value ?: return@launch
+                        try {
+                            val excludeIds = state.visible.map { it.id }.toSet()
+                            val more = recommendationEngine.getRecommendations(
+                                seedTrack = current,
+                                count = 15,
+                                excludeIds = excludeIds
+                            )
+                            if (more.isNotEmpty()) queueManager.setAutoplay(more, "proactive_refill")
+                            syncQueuePresentation()
+                            startPrefetching()
+                        } catch (e: Exception) {
+                            Log.w("MusicPlayerViewModel", "Autoplay refill failed: ${e.message}")
                         }
-                        if (related.isNotEmpty()) {
-                            val updatedQueue = q + related
-                            _queue.value = updatedQueue
-                            _currentQueueIndex.value = nextIdx
-                            _isLoading.value = false
-                            playResolvedTrack(updatedQueue[nextIdx])
-                        } else {
-                            // If no related tracks found, stop or wrap around
-                            if (isAutoPlay) {
-                                _isPlaying.value = false
-                                _currentPositionMs.value = 0L
-                                seekTo(0L)
-                            } else {
-                                val actualNextIdx = nextIdx % q.size
-                                _currentQueueIndex.value = actualNextIdx
-                                playResolvedTrack(q[actualNextIdx])
-                            }
-                            _isLoading.value = false
-                        }
-                    } else {
-                        _isLoading.value = false
                     }
                 }
-                return
             }
+            return
         }
-        
-        val actualNextIdx = nextIdx % q.size
-        _currentQueueIndex.value = actualNextIdx
-        
-        viewModelScope.launch {
-            playResolvedTrack(q[actualNextIdx])
+        val current = _currentTrack.value ?: return
+        if (_repeatMode.value == RepeatMode.ALL && queueManager.state.value.history.isNotEmpty()) {
+            queueManager.startSession(queueManager.state.value.history.first(), queueManager.state.value.history.drop(1), queueManager.state.value.source, "repeat_all")
+            val restart = queueManager.state.value.current!!; syncQueuePresentation(); playResolvedTrack(restart); return
+        }
+            viewModelScope.launch {
+                _isLoading.value = true
+                try {
+                    val excludeIds = queueManager.state.value.visible.map { it.id }.toSet() + current.id
+                    val generated = recommendationEngine.getRecommendations(
+                        seedTrack = current,
+                        count = 20,
+                        excludeIds = excludeIds
+                    )
+                if (generated.isNotEmpty()) {
+                    queueManager.setAutoplay(generated, "context_finished")
+                    val auto = queueManager.playNext("autoplay_start")
+                    syncQueuePresentation()
+                    if (auto != null) playResolvedTrack(auto)
+                } else _isPlaying.value = false
+            } finally { _isLoading.value = false }
         }
     }
 
     fun playPrevious() {
-        val q = _queue.value
-        if (q.isEmpty()) return
-        
-        // If current song is > 3 seconds, restart it. Otherwise previous song.
         if (_currentPositionMs.value > 3000L) {
             _currentPositionMs.value = 0L
             seekTo(0L, fromUser = true)
         } else {
-            val prevIdx = if (_currentQueueIndex.value - 1 < 0) q.size - 1 else _currentQueueIndex.value - 1
-            _currentQueueIndex.value = prevIdx
-            
-            viewModelScope.launch {
-                playResolvedTrack(q[prevIdx])
+            val previous = queueManager.playPrevious("previous_control")
+            if (previous != null) { syncQueuePresentation(); playResolvedTrack(previous) } else {
+                _currentPositionMs.value = 0L
+                seekTo(0L, fromUser = true)
             }
         }
     }
@@ -1857,46 +1916,120 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 prefs.edit().remove("last_firestore_sync_$uid").apply()
             }
             songDao.clearAllData()
-            _queue.value = CuratedTracks.allCurated
-            _currentQueueIndex.value = 0
-            _currentTrack.value = CuratedTracks.allCurated.first()
+            
+            // A signed-out profile must not inherit another user's session or recommendations.
+            queueManager.clear("user_logout")
+            _currentTrack.value = null
+            _isPlaying.value = false
+            syncQueuePresentation()
         }
     }
 
     // Queue Management
+    fun addTrackToPlayNext(track: Track) {
+        queueManager.addPlayNext(track)
+        syncQueuePresentation()
+    }
+
     fun addToQueue(track: Track) {
-        val updated = _queue.value.toMutableList()
-        updated.add(track)
-        _queue.value = updated
+        queueManager.addToEnd(track)
+        syncQueuePresentation()
     }
 
     fun removeFromQueue(trackId: String) {
-        val updated = _queue.value.toMutableList()
-        val index = updated.indexOfFirst { it.id == trackId }
-        if (index != -1) {
-            updated.removeAt(index)
-            _queue.value = updated
-            if (_currentQueueIndex.value >= updated.size) {
-                _currentQueueIndex.value = maxOf(0, updated.size - 1)
-            }
+        queueManager.remove(trackId)
+        syncQueuePresentation()
+    }
+
+    // Debug-only Queue Inspector actions. The UI is deliberately not exposed in release builds.
+    fun validateQueueForDebug(): String {
+        val result = queueManager.validateNow()
+        syncQueuePresentation()
+        return result
+    }
+
+    fun clearQueueForDebug() {
+        queueManager.clear("debug_inspector")
+        _currentTrack.value = null
+        _isPlaying.value = false
+        syncQueuePresentation()
+    }
+
+    fun clearQueueLogsForDebug() = queueManager.clearLogs()
+
+    fun exportQueueLogsJson(): String = queueDebugLogs.value.joinToString(prefix = "[", postfix = "]") { log ->
+        "{\"timestamp\":${log.timestamp},\"sessionId\":\"${log.sessionId}\",\"queueId\":\"${log.queueId}\",\"event\":\"${log.event}\",\"validation\":\"${log.validation}\"}"
+    }
+
+    fun exportQueueLogsCsv(): String = buildString {
+        appendLine("timestamp,sessionId,queueId,event,trigger,source,position,totalSize,validation")
+        queueDebugLogs.value.forEach { appendLine("${it.timestamp},${it.sessionId},${it.queueId},${it.event},${it.trigger},${it.source},${it.position},${it.totalSize},${it.validation}") }
+    }
+
+    fun simulateQueueForDebug(source: QueueSource) {
+        val tracks = CuratedTracks.allCurated
+        if (tracks.isEmpty()) return
+        queueManager.startSession(tracks.first(), tracks.drop(1), source, "debug_simulation")
+        _currentTrack.value = tracks.first()
+        syncQueuePresentation()
+    }
+
+    fun forceQueueRegenerationForDebug() {
+        val current = _currentTrack.value ?: return
+        viewModelScope.launch {
+            val excludeIds = queueManager.state.value.visible.map { it.id }.toSet() + current.id
+            val generated = recommendationEngine.getRecommendations(
+                seedTrack = current,
+                count = 20,
+                excludeIds = excludeIds
+            )
+            queueManager.setAutoplay(generated, "debug_force_regeneration")
+            syncQueuePresentation()
         }
     }
 
+    fun restoreQueueSessionForDebug() {
+        val prefs = getApplication<Application>().getSharedPreferences("verse_prefs", Context.MODE_PRIVATE)
+        queueManager.restore(prefs.getString("queue_manager_state_v1", null))
+        queueManager.state.value.current?.let { _currentTrack.value = it }
+        syncQueuePresentation()
+    }
+
     fun reorderQueue(fromIdx: Int, toIdx: Int) {
-        val updated = _queue.value.toMutableList()
-        if (fromIdx in updated.indices && toIdx in updated.indices) {
-            val moved = updated.removeAt(fromIdx)
-            updated.add(toIdx, moved)
-            _queue.value = updated
-            // Adjust current index if it was affected
-            if (_currentQueueIndex.value == fromIdx) {
-                _currentQueueIndex.value = toIdx
-            } else if (_currentQueueIndex.value in toIdx..fromIdx) {
-                _currentQueueIndex.value += 1
-            } else if (_currentQueueIndex.value in fromIdx..toIdx) {
-                _currentQueueIndex.value -= 1
+        val q = _queue.value
+        if (fromIdx !in q.indices || toIdx !in q.indices) return
+        
+        val list = q.toMutableList()
+        val moved = list.removeAt(fromIdx)
+        list.add(toIdx, moved)
+        
+        val state = queueManager.state.value
+        val current = _currentTrack.value
+        var newCurrentIdx = list.indexOfFirst { it.id == current?.id }
+        if (newCurrentIdx == -1) {
+            newCurrentIdx = state.position
+        }
+        
+        val newHistory = if (newCurrentIdx > 0) list.take(newCurrentIdx) else emptyList()
+        val newCurrent = if (newCurrentIdx in list.indices) list[newCurrentIdx] else current
+        val upcoming = if (newCurrentIdx + 1 < list.size) list.drop(newCurrentIdx + 1) else emptyList()
+        
+        val manualSet = state.manual.map { it.id }.toSet()
+        val autoplaySet = state.autoplay.map { it.id }.toSet()
+        val newManual = mutableListOf<Track>()
+        val newContext = mutableListOf<Track>()
+        val newAutoplay = mutableListOf<Track>()
+        
+        for (track in upcoming) {
+            when {
+                manualSet.contains(track.id) -> newManual.add(track)
+                autoplaySet.contains(track.id) -> newAutoplay.add(track)
+                else -> newContext.add(track)
             }
         }
+        
+        queueManager.replaceQueue(newHistory, newManual, newContext, newAutoplay, newCurrent, "drag_drop")
+        syncQueuePresentation()
     }
 
     // Click wheel list navigation & Scroll
@@ -2033,8 +2166,26 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     override fun onCleared() {
-        abandonAudioFocus()
         super.onCleared()
+        // Clean up new queue infrastructure
+        prefetchManager.cancel()
+        // Force-save session one last time
+        val state = queueManager.state.value
+        val session = PlaybackSession(
+            sessionId = state.sessionId,
+            source = state.source,
+            current = state.current,
+            currentBucket = state.currentBucket,
+            history = state.history,
+            manual = state.manual,
+            context = state.context,
+            autoplay = state.autoplay,
+            shuffle = state.shuffle,
+            repeat = state.repeat,
+            positionMs = _currentPositionMs.value
+        )
+        queuePersistence.saveSessionImmediate(session)
+        queuePersistence.saveRecommendationCache(recommendationCache)
         if (instance == this) {
             instance = null
         }
@@ -2087,10 +2238,10 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     com.example.data.remote.JammingService.leaveRoom(roomId, me)
                 } finally {
                     com.example.data.remote.JammingService.forceDisconnect()
+                    setJammingRoomId("")
+                    _currentScreen.value = ScreenType.EXPLORE
                 }
             }
-            setJammingRoomId("")
-            _currentScreen.value = ScreenType.EXPLORE
         }
     }
 

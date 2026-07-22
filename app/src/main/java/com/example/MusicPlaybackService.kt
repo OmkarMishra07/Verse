@@ -487,11 +487,3 @@ class VerseWebViewPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
         invalidateState()   // Tells Media3 to re-read getState() and refresh notification
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stub kept for backwards compatibility (manifest entry, any lingering references)
-// ─────────────────────────────────────────────────────────────────────────────
-class MusicPlaybackService : android.app.Service() {
-    override fun onBind(intent: Intent?) = null
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
-}

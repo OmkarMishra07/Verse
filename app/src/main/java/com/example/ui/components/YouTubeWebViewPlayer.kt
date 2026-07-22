@@ -1,11 +1,6 @@
 package com.example.ui.components
 
 import android.annotation.SuppressLint
-import android.util.Log
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,109 +29,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.example.ui.viewmodel.MusicPlayerViewModel
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  JavaScript → Kotlin bridge
-// ─────────────────────────────────────────────────────────────────────────────
-class YouTubePlayerBridge(
-    private val onReady: () -> Unit,
-    private val onStateChange: (Int) -> Unit,
-    private val onTimeUpdate: (Float) -> Unit,
-    private val onDuration: (Float) -> Unit,
-    private val onError: (Int) -> Unit
-) {
-    @JavascriptInterface fun onPlayerReady()            = onReady()
-    @JavascriptInterface fun onStateChange(state: Int) = onStateChange.invoke(state)
-    @JavascriptInterface fun onTimeUpdate(timeStr: String) = onTimeUpdate.invoke(timeStr.toFloatOrNull() ?: 0f)
-    @JavascriptInterface fun onVideoDuration(dStr: String) = onDuration.invoke(dStr.toFloatOrNull() ?: 0f)
-    @JavascriptInterface fun onPlayerError(error: Int) = onError.invoke(error)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Official YouTube Iframe API HTML
-// ─────────────────────────────────────────────────────────────────────────────
-private fun buildYouTubeIframeApiHtml(videoId: String, startSeconds: Int, autoplay: Int): String = """
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <style>
-      body, html { width: 100%; height: 100%; margin: 0; padding: 0; background-color: #000; overflow: hidden; }
-      #player { width: 100%; height: 100%; }
-    </style>
-  </head>
-  <body>
-    <div id="player"></div>
-    <script>
-      var tag = document.createElement('script');
-      tag.src = "https://www.youtube.com/iframe_api";
-      var firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-      var player;
-      function onYouTubeIframeAPIReady() {
-        player = new YT.Player('player', {
-          height: '100%',
-          width: '100%',
-          videoId: '$videoId',
-          playerVars: {
-            'playsinline': 1,
-            'autoplay': $autoplay,
-            'controls': 1,
-            'rel': 0,
-            'modestbranding': 1,
-            'fs': 0,
-            'origin': 'https://localhost',
-            'start': $startSeconds
-          },
-          events: {
-            'onReady': onPlayerReady,
-            'onStateChange': onPlayerStateChange,
-            'onError': onPlayerError
-          }
-        });
-      }
-
-      function onPlayerReady(event) {
-        if (window.AndroidPlayerBridge) {
-            AndroidPlayerBridge.onPlayerReady();
-        }
-        event.target.playVideo();
-        setInterval(function() {
-          if (player && player.getCurrentTime && player.getPlayerState() == 1) {
-            if (window.AndroidPlayerBridge) {
-                AndroidPlayerBridge.onTimeUpdate(player.getCurrentTime().toString());
-                AndroidPlayerBridge.onVideoDuration(player.getDuration().toString());
-                if (typeof player.getVideoLoadedFraction === 'function') {
-                    AndroidPlayerBridge.onVideoLoadedFraction(player.getVideoLoadedFraction().toString());
-                }
-            }
-          }
-        }, 500);
-      }
-
-      function onPlayerStateChange(event) {
-        if (!window.AndroidPlayerBridge) return;
-        if (event.data == YT.PlayerState.PLAYING) {
-          AndroidPlayerBridge.onStateChange(1);
-        } else if (event.data == YT.PlayerState.PAUSED) {
-          AndroidPlayerBridge.onStateChange(2);
-        } else if (event.data == YT.PlayerState.BUFFERING) {
-          AndroidPlayerBridge.onStateChange(3);
-        } else if (event.data == YT.PlayerState.ENDED) {
-          AndroidPlayerBridge.onStateChange(0);
-        }
-      }
-      
-      function onPlayerError(event) {
-        if (window.AndroidPlayerBridge) {
-            AndroidPlayerBridge.onPlayerError(event.data);
-        }
-      }
-    </script>
-  </body>
-</html>
-""".trimIndent()
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main embedded YouTube player — wraps the singleton WebViewHolder

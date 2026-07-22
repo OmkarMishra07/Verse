@@ -16,7 +16,7 @@ val iPodChassisDark = Color(0xFF141414) // Metallic chassis gradient end
 val iPodDisplayBg = Color(0xFF000000) // Immersive pure black display cavity
 val iPodClickWheel = Color(0xFF1F1F1F) // Matte charcoal tactile click wheel disc
 val iPodCenterSelect = Color(0xFF2A2A2A) // Metallic center selector cap
-val iPodAccentBlue = Color(0xFFB11623) // Immersive signature crimson red accent highlight
+val iPodAccentRed = Color(0xFFB11623) // Immersive signature crimson red accent highlight
 
 // Font Colors
 val iPodTextLight = Color(0xFFFFFFFF)

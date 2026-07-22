@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -72,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import coil.compose.AsyncImage
 import com.example.data.local.Playlist
 
@@ -83,7 +83,7 @@ import com.example.ui.components.YouTubeWebViewPlayer
 import com.example.ui.components.AuthScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.google.firebase.auth.FirebaseAuth
-import com.example.ui.theme.iPodAccentBlue
+import com.example.ui.theme.iPodAccentRed
 import com.example.ui.theme.iPodChassis
 import com.example.ui.theme.iPodChassisDark
 import com.example.ui.theme.iPodDisplayBg
@@ -176,7 +176,7 @@ class MainActivity : ComponentActivity() {
                                         musicViewModel.setModernMode(isModern)
                                         musicViewModel.setHasSeenWheelTutorial(isModern)
                                         musicViewModel.setHasChosenVibe(true)
-                                        kotlinx.coroutines.GlobalScope.launch {
+                                        musicViewModel.viewModelScope.launch {
                                             com.example.data.remote.FirestoreService.saveUserPreferences(currentUser!!.uid, isModern, isModern)
                                         }
                                     }
@@ -387,7 +387,7 @@ fun iPodPlayerApp(
                         (context as? android.app.Activity)?.finish()
                     }
                 ) {
-                    Text("Download Now", color = iPodAccentBlue, fontWeight = FontWeight.Bold)
+                    Text("Download Now", color = iPodAccentRed, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -437,7 +437,7 @@ fun iPodPlayerApp(
     ) {
         com.example.ui.screens.HistoryFullScreenOverlay(
             viewModel = viewModel, 
-            onBack = { viewModel.isHistoryOpen.value = false }
+            onBack = { viewModel.setHistoryOpen(false) }
         )
     }
 
@@ -478,7 +478,7 @@ fun iPodPlayerApp(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = iPodAccentBlue,
+                        focusedBorderColor = iPodAccentRed,
                         unfocusedBorderColor = Color.Gray
                     ),
                     singleLine = true,
@@ -495,7 +495,7 @@ fun iPodPlayerApp(
                         }
                     }
                 ) {
-                    Text("Create", color = iPodAccentBlue)
+                    Text("Create", color = iPodAccentRed)
                 }
             },
             dismissButton = {
@@ -520,7 +520,7 @@ fun iPodPlayerApp(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = iPodAccentBlue,
+                        focusedBorderColor = iPodAccentRed,
                         unfocusedBorderColor = Color.Gray
                     ),
                     singleLine = true,
@@ -547,7 +547,7 @@ fun iPodPlayerApp(
                         }
                     }
                 ) {
-                    Text("Import", color = iPodAccentBlue)
+                    Text("Import", color = iPodAccentRed)
                 }
             },
             dismissButton = {
@@ -590,7 +590,7 @@ fun iPodPlayerApp(
             },
             confirmButton = {
                 TextButton(onClick = { playlistToAddTo = null }) {
-                    Text("Close", color = iPodAccentBlue)
+                    Text("Close", color = iPodAccentRed)
                 }
             },
             containerColor = Color(0xFF1E2633)
@@ -731,14 +731,14 @@ fun iPodDeviceFrame(
                         end = 24.dp
                     )
                     .background(Color(0xE6000000), RoundedCornerShape(12.dp))
-                    .border(2.dp, iPodAccentBlue, RoundedCornerShape(12.dp))
+                    .border(2.dp, iPodAccentRed, RoundedCornerShape(12.dp))
                     .padding(16.dp)
             ) {
                 Column(horizontalAlignment = if (tutState == 5) Alignment.End else Alignment.CenterHorizontally) {
                     if (tutState == 5) {
                         Text("↗️", fontSize = 28.sp, modifier = Modifier.padding(bottom = 8.dp, end = 8.dp))
                     }
-                    Text(if (tutState == 5) "One more thing!" else "Welcome to Verse!", color = iPodAccentBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(if (tutState == 5) "One more thing!" else "Welcome to Verse!", color = iPodAccentRed, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         if (tutState == 1) "Try rotating the wheel in a circular motion to scroll through items. 🔄\n(Scroll now to continue)"
@@ -872,13 +872,13 @@ fun NavBarIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: Str
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (isSelected) iPodAccentBlue else Color.Gray,
+            tint = if (isSelected) iPodAccentRed else Color.Gray,
             modifier = Modifier.size(26.dp)
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = label,
-            color = if (isSelected) iPodAccentBlue else Color.Gray,
+            color = if (isSelected) iPodAccentRed else Color.Gray,
             fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
         )
@@ -972,7 +972,7 @@ fun iPodScreenDisplay(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            iPodAccentBlue.copy(alpha = 0.35f),
+                            iPodAccentRed.copy(alpha = 0.35f),
                             Color.Transparent
                         )
                     )
@@ -1226,7 +1226,7 @@ fun iPodStatusBar(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // History Icon
             IconButton(
-                onClick = { viewModel.isHistoryOpen.value = true },
+                onClick = { viewModel.setHistoryOpen(true) },
                 modifier = Modifier
                     .size(36.dp)
                     .clip(androidx.compose.foundation.shape.CircleShape)
@@ -1337,7 +1337,7 @@ fun iPodStatusBar(
                                 modifier = Modifier
                                     .size(72.dp)
                                     .clip(androidx.compose.foundation.shape.CircleShape)
-                                    .background(iPodAccentBlue),
+                                    .background(iPodAccentRed),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -1381,16 +1381,11 @@ fun iPodStatusBar(
                                 viewModel.setModernMode(it)
                                 if (tutState == 6) {
                                     viewModel.setTutorialState(7)
-                                    currentUser?.uid?.let { uid ->
-                                        kotlinx.coroutines.GlobalScope.launch {
-                                            com.example.data.remote.FirestoreService.saveUserPreferences(uid, it, true)
-                                        }
-                                    }
                                 }
                             },
                             colors = androidx.compose.material3.SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = iPodAccentBlue,
+                                checkedTrackColor = iPodAccentRed,
                                 uncheckedThumbColor = Color.Gray,
                                 uncheckedTrackColor = Color.DarkGray
                             )
@@ -1403,7 +1398,7 @@ fun iPodStatusBar(
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .background(Color(0xE6000000), RoundedCornerShape(12.dp))
-                                .border(2.dp, iPodAccentBlue, RoundedCornerShape(12.dp))
+                                .border(2.dp, iPodAccentRed, RoundedCornerShape(12.dp))
                                 .padding(16.dp)
                         ) {
                             Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
@@ -1612,7 +1607,7 @@ fun SeekBar(
                     modifier = Modifier
                         .fillMaxWidth(animatedFraction.coerceIn(0f, 1f))
                         .fillMaxHeight()
-                        .background(iPodAccentBlue, RoundedCornerShape(2.dp))
+                        .background(iPodAccentRed, RoundedCornerShape(2.dp))
                 )
             }
 
@@ -1761,7 +1756,7 @@ fun NowPlayingScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                        focusedBorderColor = iPodAccentBlue, unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = iPodAccentRed, unfocusedBorderColor = Color.DarkGray
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1769,7 +1764,7 @@ fun NowPlayingScreen(
                 if (isSearching) {
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                        color = iPodAccentBlue
+                        color = iPodAccentRed
                     )
                 }
 
@@ -1841,6 +1836,7 @@ fun NowPlayingScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // 1. Top Bar (Queue Icon)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.End
@@ -1854,284 +1850,290 @@ fun NowPlayingScreen(
                 }
             }
 
+            // 2. Middle Content (Album Art + Metadata)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(
                     modifier = Modifier
-                        .aspectRatio(1f)
-                        .shadow(12.dp, RoundedCornerShape(12.dp), clip = false)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF111111)),
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(vertical = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (currentTrack != null) {
-                        AsyncImage(
-                            model = currentTrack!!.thumbnailUrl.replace("hqdefault.jpg", "maxresdefault.jpg"),
-                            contentDescription = "Cover Art",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(1f)
+                            .shadow(12.dp, RoundedCornerShape(12.dp), clip = false)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF111111)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (currentTrack != null) {
+                            AsyncImage(
+                                model = currentTrack!!.thumbnailUrl,
+                                contentDescription = "Cover Art",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = currentTrack?.title ?: "",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        IconButton(
+                            onClick = { showSearch = !showSearch },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (showSearch) Icons.Filled.Close else Icons.Filled.Search,
+                                contentDescription = "Search",
+                                tint = if (showSearch) iPodAccentRed else Color.White.copy(0.6f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = currentTrack?.artist ?: "",
+                        color = Color.White.copy(0.8f),
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+
+                    Text(
+                        text = currentTrack?.album ?: "",
+                        color = Color.White.copy(0.5f),
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
+
+                    Spacer(modifier = Modifier.height(metaSpacerHeight))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier
+                                .background(Color.White.copy(0.12f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.VolumeUp,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = "Dolby Atmos",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.SansSerif
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        IconButton(
+                            onClick = { viewModel.toggleShuffle() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            val isShuffle by viewModel.isShuffleEnabled.collectAsState()
+                            Icon(
+                                imageVector = Icons.Filled.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = if (isShuffle) iPodAccentRed else Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { 
+                                if (isLiked) {
+                                    viewModel.requestUnlike(currentTrack!!)
+                                } else {
+                                    viewModel.toggleLikeTrack(currentTrack!!)
+                                }
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                contentDescription = "Like",
+                                tint = if (isLiked) iPodAccentRed else Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.toggleRepeatMode() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            val (icon, tint) = when (repeatMode) {
+                                com.example.ui.viewmodel.RepeatMode.ALL -> androidx.compose.material.icons.Icons.Filled.Repeat to iPodAccentRed
+                                com.example.ui.viewmodel.RepeatMode.ONE -> androidx.compose.material.icons.Icons.Filled.RepeatOne to iPodAccentRed
+                                com.example.ui.viewmodel.RepeatMode.OFF -> androidx.compose.material.icons.Icons.Filled.Repeat to Color.White.copy(alpha = 0.3f)
+                            }
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = "Repeat Mode",
+                                tint = tint,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { onAddTrackToPlaylist(currentTrack!!) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AddCircle,
+                                contentDescription = "Add to playlist",
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
 
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // 3. Bottom Controls (SeekBar, Time stamps, Links, Control Buttons)
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+                SeekBar(viewModel = viewModel)
+
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = currentTrack?.title ?: "",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = { showSearch = !showSearch },
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (showSearch) Icons.Filled.Close else Icons.Filled.Search,
-                            contentDescription = "Search",
-                            tint = if (showSearch) iPodAccentBlue else Color.White.copy(0.6f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = currentTrack?.artist ?: "",
-                    color = Color.White.copy(0.8f),
-                    fontSize = 14.sp,
-                    maxLines = 1
-                )
-
-                Text(
-                    text = currentTrack?.album ?: "",
-                    color = Color.White.copy(0.5f),
-                    fontSize = 12.sp,
-                    maxLines = 1
-                )
-
-                Spacer(modifier = Modifier.height(metaSpacerHeight))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        modifier = Modifier
-                            .background(Color.White.copy(0.12f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.VolumeUp,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Text(
-                            text = "Dolby Atmos",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.SansSerif
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    IconButton(
-                        onClick = { viewModel.toggleShuffle() },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        val isShuffle by viewModel.isShuffleEnabled.collectAsState()
-                        Icon(
-                            imageVector = Icons.Filled.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffle) iPodAccentBlue else Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { 
-                            if (isLiked) {
-                                viewModel.requestUnlike(currentTrack!!)
-                            } else {
-                                viewModel.toggleLikeTrack(currentTrack!!)
-                            }
-                        },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            contentDescription = "Like",
-                            tint = if (isLiked) iPodAccentBlue else Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { viewModel.toggleRepeatMode() },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        val (icon, tint) = when (repeatMode) {
-                            com.example.ui.viewmodel.RepeatMode.ALL -> androidx.compose.material.icons.Icons.Filled.Repeat to iPodAccentBlue
-                            com.example.ui.viewmodel.RepeatMode.ONE -> androidx.compose.material.icons.Icons.Filled.RepeatOne to iPodAccentBlue
-                            com.example.ui.viewmodel.RepeatMode.OFF -> androidx.compose.material.icons.Icons.Filled.Repeat to Color.White.copy(alpha = 0.3f)
-                        }
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = "Repeat Mode",
-                            tint = tint,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    IconButton(
-                        onClick = { onAddTrackToPlaylist(currentTrack!!) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AddCircle,
-                            contentDescription = "Add to playlist",
-                            tint = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            SeekBar(viewModel = viewModel)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(formatMs(displayPositionMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-                Text(formatMs(durationMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Lyrics",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onShowLyrics() }
-                )
-
-                Text(
-                    text = "Queue",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable {
-                        viewModel.setExpanded(true)
-                        viewModel.setScreen(ScreenType.QUEUE)
-                    }
-                )
-
-                val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-                var deviceName by remember { mutableStateOf("Speaker") }
-                
-                LaunchedEffect(Unit) {
-                    while(true) {
-                        val devices = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
-                        val active = devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET }
-                            ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET }
-                            ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                        
-                        deviceName = active?.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Speaker"
-                        kotlinx.coroutines.delay(2000)
-                    }
+                    Text(formatMs(displayPositionMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
+                    Text(formatMs(durationMs), color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                 }
 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable {
-                        try {
-                            val intent = android.content.Intent("com.android.settings.panel.action.MEDIA_OUTPUT").apply {
-                                putExtra("com.android.settings.panel.extra.PACKAGE_NAME", context.packageName)
-                            }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Media output switcher not found", e)
-                        }
-                    }
+                    modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Headphones,
-                        contentDescription = null,
-                        tint = iPodAccentBlue,
-                        modifier = Modifier.size(10.dp)
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = deviceName,
+                        text = "Lyrics",
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 100.dp)
+                        modifier = Modifier.clickable { onShowLyrics() }
                     )
-                }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            val isPlaying by viewModel.isPlaying.collectAsState()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { viewModel.playPrevious() }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(36.dp))
+                    Text(
+                        text = "Queue",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            viewModel.setExpanded(true)
+                            viewModel.setScreen(ScreenType.QUEUE)
+                        }
+                    )
+
+                    val audioManager = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                    var deviceName by remember { mutableStateOf("Speaker") }
+                    
+                    LaunchedEffect(Unit) {
+                        while(true) {
+                            val devices = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+                            val active = devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET }
+                                ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET }
+                                ?: devices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                            
+                            deviceName = active?.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Speaker"
+                            kotlinx.coroutines.delay(2000)
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable {
+                            try {
+                                val intent = android.content.Intent("com.android.settings.panel.action.MEDIA_OUTPUT").apply {
+                                    putExtra("com.android.settings.panel.extra.PACKAGE_NAME", context.packageName)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.util.Log.e("MainActivity", "Media output switcher not found", e)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Headphones,
+                            contentDescription = null,
+                            tint = iPodAccentRed,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = deviceName,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 100.dp)
+                        )
+                    }
                 }
-                FloatingActionButton(
-                    onClick = { viewModel.togglePlayback() },
-                    containerColor = iPodAccentBlue,
-                    modifier = Modifier.size(64.dp),
-                    shape = CircleShape
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val isPlaying by viewModel.isPlaying.collectAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(32.dp))
-                }
-                IconButton(onClick = { viewModel.playNext() }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(36.dp))
-                }
+                    IconButton(onClick = { viewModel.playPrevious() }, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(32.dp))
+                    }
+                    FloatingActionButton(
+                        onClick = { viewModel.togglePlayback() },
+                        containerColor = iPodAccentRed,
+                        modifier = Modifier.size(56.dp),
+                        shape = CircleShape
+                    ) {
+                        Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(28.dp))
+                    }
+                    IconButton(onClick = { viewModel.playNext() }, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(32.dp))
             }
-        }
         }
     }
+}
+}
 }
 
 @Composable
@@ -2159,7 +2161,7 @@ fun VolumeControlPopup(viewModel: MusicPlayerViewModel, modifier: Modifier = Mod
             Icon(
                 imageVector = Icons.Filled.VolumeUp,
                 contentDescription = "Volume",
-                tint = iPodAccentBlue,
+                tint = iPodAccentRed,
                 modifier = Modifier.size(16.dp)
             )
         }
@@ -2200,7 +2202,7 @@ fun VolumeControlPopup(viewModel: MusicPlayerViewModel, modifier: Modifier = Mod
                             .fillMaxWidth()
                             .fillMaxHeight(vol)
                             .align(Alignment.BottomCenter)
-                            .background(iPodAccentBlue, RoundedCornerShape(16.dp))
+                            .background(iPodAccentRed, RoundedCornerShape(16.dp))
                     )
                 }
             }
@@ -2351,7 +2353,7 @@ fun JammingScreen(
                         }
                     }
                 }
-            }, colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue), modifier = Modifier.fillMaxWidth(0.6f)) {
+            }, colors = ButtonDefaults.buttonColors(containerColor = iPodAccentRed), modifier = Modifier.fillMaxWidth(0.6f)) {
                 Text("Join Room")
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -2413,7 +2415,7 @@ fun JammingScreen(
                 Column {
                     Text("${roomState?.hostName ?: "Unknown"}'s Room", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Code: $jammingRoomId", color = iPodAccentBlue, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Code: $jammingRoomId", color = iPodAccentRed, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         
                         if (!isConnected) {
                             Spacer(modifier = Modifier.width(8.dp))
@@ -2508,7 +2510,7 @@ fun JammingScreen(
                         }
                         FloatingActionButton(
                             onClick = { viewModel.togglePlayback() },
-                            containerColor = iPodAccentBlue,
+                            containerColor = iPodAccentRed,
                             modifier = Modifier.size(64.dp),
                             shape = CircleShape
                         ) {
@@ -2578,7 +2580,7 @@ fun JammingScreen(
                             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { performSearch() }),
                             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                                focusedBorderColor = iPodAccentBlue, unfocusedBorderColor = Color.DarkGray
+                                focusedBorderColor = iPodAccentRed, unfocusedBorderColor = Color.DarkGray
                             )
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -2588,7 +2590,7 @@ fun JammingScreen(
                     }
                     if (isSearching) {
                         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.CircularProgressIndicator(color = iPodAccentBlue)
+                            androidx.compose.material3.CircularProgressIndicator(color = iPodAccentRed)
                         }
                     } else if (searchResults.isNotEmpty()) {
                         LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
@@ -2808,7 +2810,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Button(
                     onClick = { viewModel.loadSection(section) },
-                    colors = ButtonDefaults.buttonColors(containerColor = iPodAccentBlue),
+                    colors = ButtonDefaults.buttonColors(containerColor = iPodAccentRed),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                     modifier = Modifier.height(30.dp)
@@ -2962,7 +2964,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Top 10 Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                 if (top10Hits.isNotEmpty()) {
-                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top 10 Hits", top10Hits) })
+                    Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top 10 Hits", top10Hits) })
                 }
             }
             LazyRow(
@@ -2991,7 +2993,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Top Trending Songs", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                 if (trendingSongs.isNotEmpty()) {
-                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top Trending Songs", trendingSongs) })
+                    Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Top Trending Songs", trendingSongs) })
                 }
             }
             val offsetTrending = top10Hits.size
@@ -3021,7 +3023,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Trending Albums", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                 if (trendingAlbums.isNotEmpty()) {
-                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Trending Albums", trendingAlbums) })
+                    Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Trending Albums", trendingAlbums) })
                 }
             }
             val offsetAlbums = top10Hits.size + trendingSongs.size
@@ -3051,7 +3053,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("New Releases", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                 if (newReleases.isNotEmpty()) {
-                    Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("New Releases", newReleases) })
+                    Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("New Releases", newReleases) })
                 }
             }
             val offsetReleases = top10Hits.size + trendingSongs.size + trendingAlbums.size
@@ -3077,7 +3079,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (bollywoodHits.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Bollywood Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Bollywood Hits", bollywoodHits) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Bollywood Hits", bollywoodHits) })
             }
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size
             LazyRow(
@@ -3097,7 +3099,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
             val title = if (exploreRegion == MusicPlayerViewModel.ExploreRegion.INDIA) "Global Hits" else "Local Indian Hits"
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection(title, globalOrLocalHits) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection(title, globalOrLocalHits) })
             }
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size
             LazyRow(
@@ -3116,7 +3118,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (moodTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Mood & Chill", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Mood & Chill", moodTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Mood & Chill", moodTracks) })
             }
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size
             LazyRow(
@@ -3135,7 +3137,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (partyTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Party & Dance Hits", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Party & Dance Hits", partyTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Party & Dance Hits", partyTracks) })
             }
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size
             LazyRow(
@@ -3154,7 +3156,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (hipHopTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Hip-Hop & Rap Hits", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Hip-Hop & Rap Hits", hipHopTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Hip-Hop & Rap Hits", hipHopTracks) })
             }
             Spacer(modifier = Modifier.height(12.dp))
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size
@@ -3170,7 +3172,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (popTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Pop Anthems", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Pop Anthems", popTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Pop Anthems", popTracks) })
             }
             Spacer(modifier = Modifier.height(12.dp))
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size
@@ -3186,7 +3188,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (rockTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Rock & Indie Classics", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Rock & Indie Classics", rockTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("Rock & Indie Classics", rockTracks) })
             }
             Spacer(modifier = Modifier.height(12.dp))
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size
@@ -3202,7 +3204,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (rbTracks.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("R&B & Soul Hits", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("R&B & Soul Hits", rbTracks) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("R&B & Soul Hits", rbTracks) })
             }
             Spacer(modifier = Modifier.height(12.dp))
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size
@@ -3218,7 +3220,7 @@ fun ExploreScreen(viewModel: MusicPlayerViewModel) {
         if (youtubeTop10.isNotEmpty()) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("YouTube Music Top 10", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("View All", color = iPodAccentBlue, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("YouTube Music Top 10", youtubeTop10) })
+                Text("View All", color = iPodAccentRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { viewModel.openExploreSection("YouTube Music Top 10", youtubeTop10) })
             }
             Spacer(modifier = Modifier.height(12.dp))
             val offset = top10Hits.size + trendingSongs.size + trendingAlbums.size + newReleases.size + bollywoodHits.size + globalOrLocalHits.size + moodTracks.size + partyTracks.size + hipHopTracks.size + popTracks.size + rockTracks.size + rbTracks.size
@@ -3244,7 +3246,7 @@ fun SpotifyCard(track: Track, isFocused: Boolean, onClick: () -> Unit) {
             .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.Transparent)
             .border(
                 width = if (isFocused) 2.dp else 0.dp,
-                color = if (isFocused) iPodAccentBlue else Color.Transparent,
+                color = if (isFocused) iPodAccentRed else Color.Transparent,
                 shape = RoundedCornerShape(8.dp)
             )
             .clickable { onClick() }
@@ -3310,11 +3312,11 @@ fun LibraryScreen(
         androidx.compose.material3.TabRow(
             selectedTabIndex = selectedTab,
             containerColor = Color.Transparent,
-            contentColor = iPodAccentBlue,
+            contentColor = iPodAccentRed,
             indicator = { tabPositions ->
                 androidx.compose.material3.TabRowDefaults.SecondaryIndicator(
                     Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = iPodAccentBlue
+                    color = iPodAccentRed
                 )
             }
         ) {
@@ -3325,7 +3327,7 @@ fun LibraryScreen(
                     text = { 
                         Text(
                             text = title, 
-                            color = if (selectedTab == index) iPodAccentBlue else Color.Gray,
+                            color = if (selectedTab == index) iPodAccentRed else Color.Gray,
                             fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
                         ) 
                     }
@@ -3502,7 +3504,7 @@ fun LikedScreen(viewModel: MusicPlayerViewModel) {
                         ) {
                             Text(
                                 text = track.title,
-                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                color = if (isFocused) iPodAccentRed else Color.White,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -3753,7 +3755,7 @@ fun PlaylistsScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = if (isMatch) Color.Red else iPodAccentBlue,
+                            focusedBorderColor = if (isMatch) Color.Red else iPodAccentRed,
                             unfocusedBorderColor = Color.Gray
                         ),
                         singleLine = true,
@@ -4084,9 +4086,9 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                 unfocusedTextColor = Color.White,
                 focusedContainerColor = Color.White.copy(alpha = 0.1f),
                 unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
-                focusedBorderColor = iPodAccentBlue.copy(alpha = 0.5f),
+                focusedBorderColor = iPodAccentRed.copy(alpha = 0.5f),
                 unfocusedBorderColor = Color.Transparent,
-                cursorColor = iPodAccentBlue
+                cursorColor = iPodAccentRed
             ),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
@@ -4100,7 +4102,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
 
         if (isSearching) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = iPodAccentBlue, modifier = Modifier.size(36.dp))
+                CircularProgressIndicator(color = iPodAccentRed, modifier = Modifier.size(36.dp))
             }
         } else if (results.isEmpty() && query.isNotBlank()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -4206,7 +4208,7 @@ fun SearchScreen(viewModel: MusicPlayerViewModel) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = track.title,
-                                color = if (isFocused) iPodAccentBlue else Color.White,
+                                color = if (isFocused) iPodAccentRed else Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -4321,7 +4323,7 @@ fun QueueScreen(viewModel: MusicPlayerViewModel) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = track.title,
-                            color = if (isActivePlaying) Color(0xFF1DB954) else if (isFocused) iPodAccentBlue else Color.White,
+                            color = if (isActivePlaying) Color(0xFF1DB954) else if (isFocused) iPodAccentRed else Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -4530,7 +4532,7 @@ fun RankedSpotifyCard(track: Track, rank: Int, isFocused: Boolean, onClick: () -
             .background(if (isFocused) Color.White.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f))
             .border(
                 width = if (isFocused) 2.dp else 0.dp,
-                color = if (isFocused) iPodAccentBlue else Color.Transparent,
+                color = if (isFocused) iPodAccentRed else Color.Transparent,
                 shape = RoundedCornerShape(8.dp)
             )
             .clickable { onClick() }
@@ -4604,7 +4606,7 @@ fun ExploreSectionScreen(viewModel: MusicPlayerViewModel) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = iPodAccentBlue
+                    tint = iPodAccentRed
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -4635,7 +4637,7 @@ fun ExploreSectionScreen(viewModel: MusicPlayerViewModel) {
                         )
                         .border(
                             width = 1.dp,
-                            color = if (isFocused) iPodAccentBlue.copy(alpha = 0.7f) else Color.Transparent,
+                            color = if (isFocused) iPodAccentRed.copy(alpha = 0.7f) else Color.Transparent,
                             shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { viewModel.selectAndPlayTrack(track, tracks) }

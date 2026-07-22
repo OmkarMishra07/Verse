@@ -14,7 +14,7 @@
 
     <application
         android:name=".VerseApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -56,12 +56,6 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
-
-        <!-- Legacy service stub — kept to avoid any remaining references from crashing -->
-        <service
-            android:name=".MusicPlaybackService"
-            android:foregroundServiceType="mediaPlayback"
-            android:exported="false" />
 
     </application>
 

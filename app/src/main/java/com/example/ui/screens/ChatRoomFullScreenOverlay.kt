@@ -48,7 +48,7 @@ fun ChatRoomFullScreenOverlay(
     
     val currentTrack by viewModel.currentTrack.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
-    val myName = remember { currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "User-${(100..999).random()}" }
+    val myName = remember { currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "User-${currentUser?.uid?.takeLast(4) ?: "0000"}" }
     
     var chatMsg by remember { mutableStateOf("") }
     var replyToMsg by remember { mutableStateOf<com.example.data.remote.ChatMessage?>(null) }
@@ -61,10 +61,14 @@ fun ChatRoomFullScreenOverlay(
 
     val typingUsers by viewModel.typingUsers.collectAsState()
 
-    // Keep typing status updated
+    // Keep typing status updated (debounced to avoid flooding RTDB)
     LaunchedEffect(chatMsg) {
         if (jammingRoomId.isNotBlank()) {
-            com.example.data.remote.JammingService.setTypingStatus(jammingRoomId, myName, chatMsg.isNotBlank())
+            val isTyping = chatMsg.isNotBlank()
+            if (isTyping) {
+                kotlinx.coroutines.delay(400)
+            }
+            com.example.data.remote.JammingService.setTypingStatus(jammingRoomId, myName, isTyping)
         }
     }
 
@@ -282,7 +286,7 @@ fun ChatRoomFullScreenOverlay(
                     modifier = Modifier.fillMaxWidth().background(Color(0xFF161616).copy(alpha = 0.5f)).padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(model = currentTrack!!.thumbnailUrl.replace("hqdefault.jpg", "maxresdefault.jpg"), contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                    AsyncImage(model = currentTrack!!.thumbnailUrl, contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(currentTrack!!.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -493,7 +497,7 @@ fun ChatRoomFullScreenOverlay(
                 item {
                     Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                         Text(
-                            "🔒 Chats are End-to-End Encrypted and Safe",
+                            "🔒 Chats are Private and Secure",
                             color = Color(0xFFFFD700),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,

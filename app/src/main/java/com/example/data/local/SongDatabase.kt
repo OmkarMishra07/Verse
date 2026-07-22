@@ -1,6 +1,8 @@
 package com.example.data.local
 
+import android.util.Log
 import androidx.room.*
+import androidx.room.Database
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "liked_songs")
@@ -152,7 +154,7 @@ interface SongDao {
 @Database(
     entities = [LikedSong::class, Playlist::class, PlaylistSong::class, RecentlyPlayed::class, ExploreCache::class],
     version = 3,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class SongDatabase : RoomDatabase() {
     abstract fun songDao(): SongDao
@@ -162,6 +164,19 @@ abstract class SongDatabase : RoomDatabase() {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE playlists ADD COLUMN sharedUserId TEXT")
                 database.execSQL("ALTER TABLE playlists ADD COLUMN sharedPlaylistId INTEGER")
+            }
+        }
+
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS explore_cache (
+                        sectionKey TEXT NOT NULL,
+                        dataJson TEXT NOT NULL,
+                        lastScrapedAt INTEGER NOT NULL,
+                        PRIMARY KEY(sectionKey)
+                    )
+                """)
             }
         }
 
@@ -175,7 +190,12 @@ abstract class SongDatabase : RoomDatabase() {
                     SongDatabase::class.java,
                     "song_database"
                 )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addCallback(object : Callback() {
+                    override fun onDestructiveMigration(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        Log.w("SongDatabase", "DESTRUCTIVE migration triggered — all local data wiped")
+                    }
+                })
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance

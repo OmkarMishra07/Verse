@@ -1,12 +1,11 @@
 package com.example.ui.components
 
 import android.view.HapticFeedbackConstants
-import androidx.compose.animation.core.*
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -44,8 +43,6 @@ import kotlin.math.atan2
 import android.content.Context
 import android.media.AudioManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.LocalIndication
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -311,7 +308,7 @@ fun ClickWheel(
                     val isLoading by viewModel.isLoading.collectAsState()
                     if (isLoading) {
                         androidx.compose.material3.CircularProgressIndicator(
-                            color = com.example.ui.theme.iPodAccentBlue,
+                            color = com.example.ui.theme.iPodAccentRed,
                             modifier = Modifier.size(22.dp),
                             strokeWidth = 2.5.dp
                         )
@@ -444,7 +441,7 @@ fun ClickWheel(
                         label = "RadialItemScale"
                     )
                     val itemColor by animateColorAsState(
-                        targetValue = if (isSelected) com.example.ui.theme.iPodAccentBlue else Color.White.copy(alpha = 0.5f),
+                        targetValue = if (isSelected) com.example.ui.theme.iPodAccentRed else Color.White.copy(alpha = 0.5f),
                         label = "RadialItemColor"
                     )
 
@@ -463,11 +460,11 @@ fun ClickWheel(
                                 .size(36.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isSelected) com.example.ui.theme.iPodAccentBlue.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f)
+                                    if (isSelected) com.example.ui.theme.iPodAccentRed.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f)
                                 )
                                 .border(
                                     width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected) com.example.ui.theme.iPodAccentBlue else Color.White.copy(alpha = 0.1f),
+                                    color = if (isSelected) com.example.ui.theme.iPodAccentRed else Color.White.copy(alpha = 0.1f),
                                     shape = CircleShape
                                 ),
                             contentAlignment = Alignment.Center

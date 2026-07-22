@@ -17,7 +17,7 @@ data class ITunesEntry(
 
 object ITunesHelper {
     private const val TAG = "ITunesHelper"
-    private val client = OkHttpClient.Builder().build()
+    private val client = NetworkClient.client
 
     suspend fun getTopSongs(isIndia: Boolean): List<ITunesEntry> {
         val region = if (isIndia) "in" else "us"

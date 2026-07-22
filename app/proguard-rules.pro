@@ -1,21 +1,63 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ── Verse ProGuard Rules ──────────────────────────────────────────────────────
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ── WebView JavaScript Interface ──────────────────────────────────────────────
+# Required: keep the JS bridge class and all public methods so WebView.evaluateJavascript works.
+-keepclassmembers class com.example.WebViewHolder$PlayerBridge {
+    public *;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ── Moshi (JSON serialization) ────────────────────────────────────────────────
+-keep class com.squareup.moshi.** { *; }
+-keepclassmembers class * {
+    @com.squareup.moshi.Json <fields>;
+}
+-keep @com.squareup.moshi.JsonQualifier interface *
+-dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
+-dontwarn javax.annotation.**
+-dontwarn kotlin.**
+-keep class kotlin.Metadata { *; }
+-keepclassmembers class kotlin.Metadata {
+    public <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# ── Room Entities & DAO ───────────────────────────────────────────────────────
+-keep class com.example.data.local.** { *; }
+
+# ── Retrofit / OkHttp ────────────────────────────────────────────────────────
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class okhttp3.** { *; }
+
+# ── Firebase / Google Play Services ──────────────────────────────────────────
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+
+# ── Media3 / ExoPlayer ───────────────────────────────────────────────────────
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+
+# ── Coil ──────────────────────────────────────────────────────────────────────
+-keep class coil.** { *; }
+-dontwarn coil.**
+
+# ── Credential Manager / Google Identity ──────────────────────────────────────
+-keep class androidx.credentials.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-dontwarn androidx.credentials.**
+
+# ── Data model classes used by reflection (Moshi / Firebase) ──────────────────
+-keep class com.example.data.model.** { *; }
+-keep class com.example.data.remote.JammingRoom { *; }
+-keep class com.example.data.remote.ChatMessage { *; }
+-keep class com.example.data.network.YouTubeVideo { *; }
+-keep class com.example.data.network.ITunesEntry { *; }
+-keep class com.example.data.network.LRCLibResponse { *; }
+
+# ── Preserve line numbers for Crashlytics ─────────────────────────────────────
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

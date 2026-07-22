@@ -18,7 +18,7 @@ class RoomCleanupWorker(
         Log.d("RoomCleanupWorker", "Running background cleanup check for room: $roomId")
 
         try {
-            val rtdb = FirebaseDatabase.getInstance("https://verse-d9583-default-rtdb.asia-southeast1.firebasedatabase.app")
+            val rtdb = FirebaseDatabase.getInstance(com.example.BuildConfig.RTDB_URL)
             val rtdbStateRef = rtdb.getReference("jamming_rooms/$roomId/state")
 
             // Check participants in RTDB

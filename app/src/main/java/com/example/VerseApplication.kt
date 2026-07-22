@@ -6,6 +6,9 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
+import com.google.firebase.Firebase
+import com.google.firebase.initialize
+import okhttp3.OkHttpClient
 
 class VerseApplication : Application(), ImageLoaderFactory {
     companion object {
@@ -13,9 +16,23 @@ class VerseApplication : Application(), ImageLoaderFactory {
             private set
     }
 
+    /** Shared OkHttpClient for Coil image loading with thumbnail fallback. */
+    val coilClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .addInterceptor(com.example.data.network.ThumbnailFallbackInterceptor())
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        Firebase.initialize(this)
+        // TODO: Initialize App Check when reCAPTCHA site key is configured in Firebase Console.
+        // See: https://firebase.google.com/docs/app-check/android/recaptcha
+
         scheduleExploreRefresh()
     }
 
@@ -44,7 +61,7 @@ class VerseApplication : Application(), ImageLoaderFactory {
             .memoryCachePolicy(CachePolicy.ENABLED)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(0.30)
                     .strongReferencesEnabled(true)
                     .build()
             }
@@ -52,10 +69,11 @@ class VerseApplication : Application(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizePercent(0.02)
+                    .maxSizePercent(0.05)
                     .build()
             }
-            // Smart catching technique: use respectCacheHeaders(false) to enforce caching
+            .bitmapFactoryMaxParallelism(2)
+            .okHttpClient(coilClient)
             .respectCacheHeaders(false)
             .build()
     }

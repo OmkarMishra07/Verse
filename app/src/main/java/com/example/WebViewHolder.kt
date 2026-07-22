@@ -26,12 +26,12 @@ object WebViewHolder {
 
     @SuppressLint("StaticFieldLeak")
     private var webView: WebView? = null
-    private var isInitialized = false
-    private var isPlayerReady = false
-    private var hasLoadedFirstVideo = false
-    private var lastLoadedVideoId: String? = null
-    private var lastAutoplay: Boolean = true
-    private var lastLoadTime: Long = 0L
+    @Volatile private var isInitialized = false
+    @Volatile private var isPlayerReady = false
+    @Volatile private var hasLoadedFirstVideo = false
+    @Volatile private var lastLoadedVideoId: String? = null
+    @Volatile private var lastAutoplay: Boolean = true
+    @Volatile private var lastLoadTime: Long = 0L
 
     fun setPlayerReady(ready: Boolean) {
         isPlayerReady = ready
@@ -63,7 +63,7 @@ object WebViewHolder {
             settings.mediaPlaybackRequiresUserGesture = false
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
-            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             
             // Critical for background audio: prevent Chromium from throttling JavaScript timers
             resumeTimers()
@@ -120,13 +120,14 @@ object WebViewHolder {
             if (!hasLoadedFirstVideo || !isPlayerReady) {
                 hasLoadedFirstVideo = true
                 isPlayerReady = false
-                val html = buildIframeHtml(videoId, startSeconds, if (autoplay) 1 else 0)
+                val html = buildIframeHtml(sanitizeVideoId(videoId), startSeconds, if (autoplay) 1 else 0)
                 wv.loadDataWithBaseURL("https://localhost", html, "text/html", "UTF-8", null)
             } else {
+                val safeId = sanitizeVideoId(videoId)
                 val js = if (autoplay) {
-                    "if(typeof player!=='undefined'&&player.loadVideoById) player.loadVideoById('$videoId',$startSeconds);"
+                    "if(typeof player!=='undefined'&&player.loadVideoById){player.loadVideoById('$safeId',$startSeconds);try{player.setPlaybackQuality('small');}catch(e){}}"
                 } else {
-                    "if(typeof player!=='undefined'&&player.cueVideoById) player.cueVideoById('$videoId',$startSeconds);"
+                    "if(typeof player!=='undefined'&&player.cueVideoById){player.cueVideoById('$safeId',$startSeconds);try{player.setPlaybackQuality('small');}catch(e){}}"
                 }
                 wv.evaluateJavascript(js, null)
             }
@@ -179,6 +180,9 @@ object WebViewHolder {
         Log.d("WebViewHolder", "WebView destroyed and cache cleared")
     }
 
+    /** Strip any characters that could break out of a JS string literal. */
+    private fun sanitizeVideoId(id: String): String = id.replace(Regex("[^a-zA-Z0-9_-]"), "")
+
     private fun buildIframeHtml(videoId: String, startSeconds: Int, autoplay: Int): String = """
 <!DOCTYPE html>
 <html>
@@ -201,10 +205,11 @@ object WebViewHolder {
       function onYouTubeIframeAPIReady() {
         player = new YT.Player('player', {
           height: '100%', width: '100%',
-          videoId: '$videoId',
+          videoId: '${sanitizeVideoId(videoId)}',
           playerVars: {
             'playsinline': 1, 'autoplay': $autoplay,
             'controls': 1, 'rel': 0, 'modestbranding': 1, 'fs': 0,
+            'quality': 'small',
             'origin': 'https://localhost', 'start': $startSeconds
           },
           events: {
@@ -217,6 +222,9 @@ object WebViewHolder {
 
       function onPlayerReady(event) {
         if (window.AndroidPlayerBridge) AndroidPlayerBridge.onPlayerReady();
+        // Force lowest video quality — Verse is an audio player, video is wasted bandwidth.
+        // 'small' = 240p with ~128kbps audio. Saves ~68% bandwidth vs auto quality.
+        try { event.target.setPlaybackQuality('small'); } catch(e) {}
         if ($autoplay === 1) {
             event.target.playVideo();
         }

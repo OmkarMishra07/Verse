@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.util.Log
+import com.example.BuildConfig
 import com.example.data.model.Track
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -12,7 +13,6 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -63,8 +63,7 @@ data class ChatMessage(
 
 object JammingService {
     private val db   = FirebaseFirestore.getInstance()
-    // RTDB URL hardcoded because google-services.json doesn't include firebase_database_url
-    private val rtdb = FirebaseDatabase.getInstance("https://verse-d9583-default-rtdb.asia-southeast1.firebasedatabase.app")
+    private val rtdb = FirebaseDatabase.getInstance(BuildConfig.RTDB_URL)
     private const val TAG = "JammingService"
 
     private const val ROOM_COMPATIBILITY_VERSION = 1
@@ -73,9 +72,6 @@ object JammingService {
     private var serverTimeOffset: Long = 0L
 
     init {
-        // Enable Firebase Database internal debug logging
-        FirebaseDatabase.getInstance().setLogLevel(com.google.firebase.database.Logger.Level.DEBUG)
-        
         // Force RTDB to stay offline by default so we don't consume concurrent connections
         // when users are just browsing their local library.
         rtdb.goOffline()
@@ -226,10 +222,14 @@ object JammingService {
                     currentData.child("roomVersion").value = ROOM_COMPATIBILITY_VERSION
                 }
 
-                // Check if the current user is blocked
+                // Check if the current user is blocked or kicked
                 Log.d(TAG, "joinRoom transaction: user=$participantName, hasBlocked=${currentData.hasChild("blocked/$participantName")}, hasKicked=${currentData.hasChild("kicked/$participantName")}")
                 if (currentData.hasChild("blocked/$participantName")) {
                     resultHolder.status = "BLOCKED"
+                    return@runTransactionAwait Transaction.abort()
+                }
+                if (currentData.hasChild("kicked/$participantName")) {
+                    resultHolder.status = "KICKED"
                     return@runTransactionAwait Transaction.abort()
                 }
 
@@ -344,6 +344,11 @@ object JammingService {
                 return@runTransactionAwait Transaction.abort()
             }
             currentData.child("kicked/$targetName").value = true
+            // Remove participant devices so they're fully disconnected
+            currentData.child("participants/$targetName").value = null
+            currentData.child("joinedAt/$targetName").value = null
+            // Clear typing status
+            currentData.child("typing/$targetName").value = null
             Transaction.success(currentData)
         }
     }
@@ -358,6 +363,11 @@ object JammingService {
             }
             currentData.child("blocked/$targetName").value = true
             currentData.child("kicked/$targetName").value = true
+            // Remove participant devices so they're fully disconnected
+            currentData.child("participants/$targetName").value = null
+            currentData.child("joinedAt/$targetName").value = null
+            // Clear typing status
+            currentData.child("typing/$targetName").value = null
             Transaction.success(currentData)
         }
     }

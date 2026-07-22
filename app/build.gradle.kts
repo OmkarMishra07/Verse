@@ -7,6 +7,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  alias(libs.plugins.room)
   id("com.google.firebase.crashlytics")
 }
 
@@ -46,12 +47,15 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = if (file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks").exists()) {
-          signingConfigs.getByName("release")
+      val keystoreFile = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
+      if (keystoreFile.exists()) {
+        signingConfig = signingConfigs.getByName("release")
       } else {
-          signingConfigs.getByName("debug")
+        // CI/CD should always have the keystore. Local dev falls back to debug.
+        logger.warn("WARNING: Release keystore not found. Signing with debug key. Do NOT distribute this APK.")
+        signingConfig = signingConfigs.getByName("debug")
       }
     }
     debug {
@@ -67,6 +71,10 @@ android {
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
 
+}
+
+room {
+  schemaDirectory("$projectDir/schemas")
 }
 
 base {
@@ -85,17 +93,10 @@ googleServices {
 }
 
 
-// Some unused dependencies are commented out below instead of being removed.
-// This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
-  // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -103,7 +104,6 @@ dependencies {
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
-  implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
   implementation("com.google.firebase:firebase-analytics")
   implementation("com.google.firebase:firebase-crashlytics")
   implementation("com.google.firebase:firebase-auth")
@@ -113,11 +113,9 @@ dependencies {
   implementation("androidx.credentials:credentials:1.3.0")
   implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
   implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
-  // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
-  // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
@@ -129,7 +127,6 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
-  // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

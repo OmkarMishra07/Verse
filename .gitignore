@@ -1,20 +1,37 @@
+# ── IDE ────────────────────────────────────────────────────────────────────────
 *.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+.idea/
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+
+# ── Gradle ────────────────────────────────────────────────────────────────────
+.gradle/
+.kotlin/
 local.properties
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# ── Environment & Secrets ─────────────────────────────────────────────────────
 .env
-debug.keystore
+*.keystore
+!debug.keystore
+
+# ── Android SDK (local setup) ─────────────────────────────────────────────────
 android-sdk/
 cmdline-tools.zip
+
+# ── Build Outputs ─────────────────────────────────────────────────────────────
+/apks/
+*.apk
+*.aab
+
+# ── Logcat & Debug Artifacts ──────────────────────────────────────────────────
+*.log
+logcat*.txt
+
+# ── Development Scripts (keep in scripts/ folder instead) ─────────────────────
+*.ps1
+
+# ── OS-specific ───────────────────────────────────────────────────────────────
+Thumbs.db

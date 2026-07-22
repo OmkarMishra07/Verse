@@ -4,7 +4,6 @@ import android.util.Log
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
 import java.util.regex.Pattern
@@ -19,19 +18,21 @@ data class YouTubeVideo(
 
 object YouTubeSearchHelper {
     private const val TAG = "YouTubeSearchHelper"
-    private val client = OkHttpClient.Builder()
-        .cookieJar(object : okhttp3.CookieJar {
-            private val cookieStore = java.util.concurrent.ConcurrentHashMap<String, List<okhttp3.Cookie>>()
-            override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {
-                cookieStore[url.host] = cookies
-            }
-            override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
-                return cookieStore[url.host] ?: emptyList()
-            }
-        })
-        .build()
+    private val client = NetworkClient.client
+    private var searchCache: SearchCache? = null
+
+    /** Initialize with SharedPreferences for caching. Call once from Application. */
+    fun init(prefs: android.content.SharedPreferences) {
+        searchCache = SearchCache(prefs)
+    }
 
     suspend fun search(query: String): List<YouTubeVideo> = withContext(Dispatchers.IO) {
+        // Check cache first
+        searchCache?.get(query)?.let { cached ->
+            Log.d(TAG, "Cache hit for query='${query.take(30)}' — ${cached.size} results")
+            return@withContext cached
+        }
+
         val results = mutableListOf<YouTubeVideo>()
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -122,7 +123,7 @@ object YouTubeSearchHelper {
                     if (mins > 10) continue
                 }
 
-                val thumbnailUrl = "https://img.youtube.com/vi/$videoId/maxresdefault.jpg"
+                val thumbnailUrl = "https://i.ytimg.com/vi/$videoId/maxresdefault.jpg"
                 val video = YouTubeVideo(
                     videoId = videoId,
                     title = title,
@@ -141,7 +142,11 @@ object YouTubeSearchHelper {
             FirebaseCrashlytics.getInstance().log("YouTubeSearch failed for query='${query.take(50)}'")
             FirebaseCrashlytics.getInstance().recordException(e)
         }
-        
+        // Cache successful results
+        if (results.isNotEmpty()) {
+            searchCache?.put(query, results)
+        }
+
         // Return results, falling back to empty if failed
         results
     }
